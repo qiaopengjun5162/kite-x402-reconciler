@@ -6,7 +6,9 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use kite_x402_reconciler::ingest::{decode_payment_response, read_records};
 use kite_x402_reconciler::reconcile::summarize;
-use kite_x402_reconciler::report::{render_records, render_summary, render_validation, Format};
+use kite_x402_reconciler::report::{
+    render_full_report, render_records, render_summary, render_validation, Format,
+};
 use kite_x402_reconciler::sample_records;
 use kite_x402_reconciler::validate::validate_all;
 
@@ -131,10 +133,7 @@ fn main() -> Result<()> {
             let records = read_records(input.as_deref()).context("failed to read records")?;
             let summary = summarize(&records);
             let report = validate_all(&records);
-            let mut body = String::new();
-            body.push_str(&render_summary(&summary, format));
-            body.push('\n');
-            body.push_str(&render_validation(&report, format));
+            let body = render_full_report(&summary, &report, format);
             if output.as_os_str() == "-" {
                 print!("{body}");
             } else {

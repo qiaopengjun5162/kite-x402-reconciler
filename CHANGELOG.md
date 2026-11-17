@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `report --format json` now emits **one** valid JSON document
+  (`{"summary": ..., "validation": ...}`) instead of two concatenated objects
+  that no JSON parser could read. New regression test parses the output.
+- `u128` amount overflow no longer panics in debug (or silently wraps in
+  release). `Totals.amount_overflows` counts dropped amounts and the text
+  report prints a prominent warning so totals never silently lie.
+- README `decode` quick-start example used a fake base64 payload that always
+  failed; replaced with a real, parseable `PAYMENT-RESPONSE` header.
+
 ### Added
 
 - `tests/cli.rs`: 12 end-to-end integration tests driving the real binary via
@@ -18,7 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (submission artifact).
 - README: Configuration and Known limitations sections.
 
-**Test count: 45 (33 unit + 12 integration).**
+- Regression tests for JSON report parseability and amount overflow.
+
+**Test count: 47 (34 unit + 13 integration).**
 
 ## [0.1.0] - 2026-11-17
 

@@ -121,6 +121,12 @@ pub fn render_summary(summary: &Summary, format: Format) -> String {
                 summary.total.failed,
                 summary.total.amount_atomic
             );
+            if summary.total.amount_overflows > 0 {
+                out.push_str(&format!(
+                    "WARNING: {} amount(s) exceeded u128::MAX and were NOT counted; total is incomplete.\n\n",
+                    summary.total.amount_overflows
+                ));
+            }
             out.push_str("By network:\n");
             for (network, totals) in &summary.by_network {
                 out.push_str(&format!(
@@ -136,6 +142,37 @@ pub fn render_summary(summary: &Summary, format: Format) -> String {
                 ));
             }
             out
+        }
+    }
+}
+
+/// Render a complete reconciliation report (summary + validation issues) as a
+/// single document.
+///
+/// For JSON this is one object with `summary` and `validation` keys — NOT two
+/// concatenated JSON documents (which would be invalid JSON and unparseable).
+/// Text and CSV keep the historic two-section layout.
+pub fn render_full_report(
+    summary: &Summary,
+    validation: &ValidationReport,
+    format: Format,
+) -> String {
+    #[derive(Serialize)]
+    struct FullReport<'a> {
+        summary: &'a Summary,
+        validation: &'a ValidationReport,
+    }
+
+    match format {
+        Format::Json => to_json_pretty(&FullReport {
+            summary,
+            validation,
+        }),
+        Format::Text | Format::Csv => {
+            let mut body = render_summary(summary, format);
+            body.push('\n');
+            body.push_str(&render_validation(validation, format));
+            body
         }
     }
 }

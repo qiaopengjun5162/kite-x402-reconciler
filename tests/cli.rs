@@ -152,6 +152,27 @@ fn cli_report_json_contains_summary_and_issues() {
     assert!(text.contains("duplicate-transaction"));
 }
 
+#[test]
+fn cli_report_json_is_a_single_parseable_document() {
+    // Regression: `report --format json` used to concatenate two independent
+    // JSON documents (summary + validation), which no JSON parser accepts.
+    let output = run(&["sample"], None);
+    let ledger = stdout_text(&output);
+    let report = run(
+        &["report", "--input", "-", "--format", "json"],
+        Some(&ledger),
+    );
+    assert!(report.status.success());
+    let value: serde_json::Value = serde_json::from_str(&stdout_text(&report))
+        .expect("report JSON must be one parseable document");
+    assert!(value.get("summary").is_some(), "missing summary object");
+    assert!(
+        value.get("validation").is_some(),
+        "missing validation object"
+    );
+    assert_eq!(value.as_object().map(|m| m.len()), Some(2));
+}
+
 // ---- library-level edge cases (boundary tests) ----
 
 #[test]

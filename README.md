@@ -49,7 +49,7 @@ kite-x402-reconciler duplicates --input ledger.json
 kite-x402-reconciler report --input ledger.json --output report.json --format json
 
 # 6. Decode a PAYMENT-RESPONSE header from a real x402 response.
-kite-x402-reconciler decode 'eyJzdWNjZXNzIjp0cnVlLC4uLn0='
+kite-x402-reconciler decode 'eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YTFiMmMzZDRhMWIyYzNkNGExYjJjM2Q0YTFiMmMzZDRhMWIyYzNkNGExYjJjM2Q0YTFiMmMzZDRhMWIyYzNkNCIsIm5ldHdvcmsiOiJlaXAxNTU6MjQyNCIsImFtb3VudCI6IjE1MDAwMDAiLCJwYXllciI6IjB4OWY4ZTdkNmM1YjRhMzkyODE3MDY5ZjhlN2Q2YzViNGEzOTI4MTcwNiJ9'
 ```
 
 Input can be a JSON array, JSONL (one object per line), or a single object. Use `--input -` (or omit it) to read from stdin, so it pipes naturally:

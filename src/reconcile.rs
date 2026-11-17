@@ -20,6 +20,9 @@ pub struct Totals {
     pub amount_atomic: u128,
     /// Number of records whose amount was missing or unparseable.
     pub amount_unavailable: usize,
+    /// Number of successful amounts dropped because the running total would
+    /// exceed `u128::MAX`. Non-zero means `amount_atomic` could not stay exact.
+    pub amount_overflows: usize,
 }
 
 impl Totals {
@@ -28,7 +31,10 @@ impl Totals {
         if record.success {
             self.succeeded += 1;
             match record.amount_atomic() {
-                Some(Ok(value)) => self.amount_atomic += value,
+                Some(Ok(value)) => match self.amount_atomic.checked_add(value) {
+                    Some(sum) => self.amount_atomic = sum,
+                    None => self.amount_overflows += 1,
+                },
                 _ => self.amount_unavailable += 1,
             }
         } else {
@@ -188,5 +194,17 @@ mod tests {
         let summary = summarize(&[]);
         assert_eq!(summary.record_count, 0);
         assert!(summary.by_network.is_empty());
+    }
+
+    #[test]
+    fn amount_overflow_is_counted_instead_of_panicking() {
+        let max = u128::MAX.to_string();
+        let records = vec![
+            rec("eip155:1", None, None, true, Some(&max)),
+            rec("eip155:1", None, None, true, Some("1")),
+        ];
+        let summary = summarize(&records);
+        assert_eq!(summary.total.amount_atomic, u128::MAX);
+        assert_eq!(summary.total.amount_overflows, 1);
     }
 }
