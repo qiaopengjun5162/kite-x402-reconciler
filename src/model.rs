@@ -122,10 +122,11 @@ impl SettlementRecord {
 
     /// Parse `amount` into an unsigned 128-bit atomic amount.
     ///
-    /// Returns `None` when the record has no amount. Returns `Some(Err(_))`
-    /// when the amount string is present but not a valid non-negative integer.
-    pub fn amount_atomic(&self) -> Option<Result<u128, std::num::ParseIntError>> {
-        self.amount.as_deref().map(|raw| raw.parse::<u128>())
+    /// `Ok(None)` when the record has no amount; `Ok(Some(value))` on success;
+    /// `Err(_)` when the amount is present but not a valid non-negative integer.
+    /// A single `Result` keeps callers from peeling two layers of `Option`/`Result`.
+    pub fn amount_atomic(&self) -> Result<Option<u128>, std::num::ParseIntError> {
+        self.amount.as_deref().map(str::parse::<u128>).transpose()
     }
 }
 
@@ -174,7 +175,7 @@ mod tests {
         let record: SettlementRecord = serde_json::from_str(json).unwrap();
         assert!(record.success);
         assert_eq!(record.network, "eip155:2424");
-        assert_eq!(record.amount_atomic(), Some(Ok(1_000_000)));
+        assert_eq!(record.amount_atomic(), Ok(Some(1_000_000)));
         assert_eq!(record.resource, None);
     }
 
@@ -211,11 +212,11 @@ mod tests {
             timestamp: None,
             nonce: None,
         };
-        assert_eq!(base.amount_atomic(), None);
+        assert_eq!(base.amount_atomic(), Ok(None));
         let with_bad = SettlementRecord {
             amount: Some("1.5".into()),
             ..base
         };
-        assert!(with_bad.amount_atomic().unwrap().is_err());
+        assert!(with_bad.amount_atomic().is_err());
     }
 }

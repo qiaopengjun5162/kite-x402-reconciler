@@ -173,6 +173,36 @@ fn cli_report_json_is_a_single_parseable_document() {
     assert_eq!(value.as_object().map(|m| m.len()), Some(2));
 }
 
+#[test]
+fn cli_report_csv_has_one_header_and_both_kinds() {
+    let output = run(&["sample"], None);
+    let ledger = stdout_text(&output);
+    let report = run(
+        &["report", "--input", "-", "--format", "csv"],
+        Some(&ledger),
+    );
+    assert!(report.status.success());
+    let text = stdout_text(&report);
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.starts_with("section,"))
+            .count(),
+        1,
+        "report CSV must have exactly one header"
+    );
+    assert!(
+        !text.contains("index,code,severity,message"),
+        "no second header"
+    );
+    assert!(text.contains("summary,total"), "summary rows present");
+    assert!(text.contains("issue,"), "issue rows present");
+    // Every data row must have the same column count as the header.
+    let columns = text.lines().next().unwrap().split(',').count();
+    for line in text.lines().skip(1).filter(|l| !l.is_empty()) {
+        assert_eq!(line.split(',').count(), columns, "ragged CSV row: {line}");
+    }
+}
+
 // ---- library-level edge cases (boundary tests) ----
 
 #[test]

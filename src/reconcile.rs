@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::model::SettlementRecord;
@@ -31,11 +32,11 @@ impl Totals {
         if record.success {
             self.succeeded += 1;
             match record.amount_atomic() {
-                Some(Ok(value)) => match self.amount_atomic.checked_add(value) {
+                Ok(Some(value)) => match self.amount_atomic.checked_add(value) {
                     Some(sum) => self.amount_atomic = sum,
                     None => self.amount_overflows += 1,
                 },
-                _ => self.amount_unavailable += 1,
+                Ok(None) | Err(_) => self.amount_unavailable += 1,
             }
         } else {
             self.failed += 1;
@@ -73,11 +74,15 @@ pub fn summarize(records: &[SettlementRecord]) -> Summary {
         let payer = record.payer.clone().unwrap_or_else(|| "(unknown)".into());
         summary.by_payer.entry(payer).or_default().add(record);
 
+        // Normalize to UTC before taking the calendar date. Using the
+        // record's own offset would split one settlement day across two keys
+        // when a ledger mixes timezones (e.g. 23:30-05:00 is already next-day
+        // UTC). UTC is the only stable reference across payers.
         let day = record
             .timestamp
             .as_deref()
-            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
-            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+            .map(|dt| dt.with_timezone(&Utc).format("%Y-%m-%d").to_string())
             .unwrap_or_else(|| "(unknown)".into());
         summary.by_day.entry(day).or_default().add(record);
     }
@@ -194,6 +199,20 @@ mod tests {
         let summary = summarize(&[]);
         assert_eq!(summary.record_count, 0);
         assert!(summary.by_network.is_empty());
+    }
+
+    #[test]
+    fn by_day_normalizes_to_utc() {
+        // 23:30 at -05:00 is 04:30 next day in UTC; 10:00 at +08:00 is
+        // 02:00 the same UTC day. Both must land on the correct UTC date.
+        let mut late = rec("eip155:1", None, None, true, Some("100"));
+        late.timestamp = Some("2026-11-17T23:30:00-05:00".into());
+        let mut early = rec("eip155:1", None, None, true, Some("200"));
+        early.timestamp = Some("2026-11-17T10:00:00+08:00".into());
+
+        let summary = summarize(&[late, early]);
+        assert_eq!(summary.by_day["2026-11-18"].count, 1);
+        assert_eq!(summary.by_day["2026-11-17"].count, 1);
     }
 
     #[test]

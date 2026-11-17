@@ -114,15 +114,10 @@ fn main() -> Result<()> {
                 .into_iter()
                 .filter(|issue| matches!(issue.code, "duplicate-transaction" | "duplicate-nonce"))
                 .collect();
-            let filtered = kite_x402_reconciler::validate::ValidationReport {
-                checked: records.len(),
-                errors: duplicates
-                    .iter()
-                    .filter(|i| i.severity == kite_x402_reconciler::validate::Severity::Error)
-                    .count(),
-                warnings: 0,
-                issues: duplicates,
-            };
+            let filtered = kite_x402_reconciler::validate::ValidationReport::from_issues(
+                records.len(),
+                duplicates,
+            );
             print!("{}", render_validation(&filtered, format));
         }
         Command::Report {

@@ -45,6 +45,25 @@ pub struct ValidationReport {
 }
 
 impl ValidationReport {
+    /// Build a report from an already-collected issue set, counting severities
+    /// in one place. Callers must not compute `errors`/`warnings` by hand.
+    pub fn from_issues(checked: usize, issues: Vec<Issue>) -> Self {
+        let errors = issues
+            .iter()
+            .filter(|issue| issue.severity == Severity::Error)
+            .count();
+        let warnings = issues
+            .iter()
+            .filter(|issue| issue.severity == Severity::Warning)
+            .count();
+        Self {
+            checked,
+            errors,
+            warnings,
+            issues,
+        }
+    }
+
     fn push(&mut self, issue: Issue) {
         match issue.severity {
             Severity::Error => self.errors += 1,
@@ -59,26 +78,22 @@ impl ValidationReport {
     }
 }
 
+/// True when `value` is `0x` (or `0X`) followed by exactly `hex_len` hex digits.
+fn is_hex_string(value: &str, hex_len: usize) -> bool {
+    value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .is_some_and(|hex| hex.len() == hex_len && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// Look like an EVM address: `0x` followed by 40 hex digits.
 fn looks_like_address(value: &str) -> bool {
-    let rest = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"));
-    match rest {
-        Some(hex) => hex.len() == 40 && hex.bytes().all(|b| b.is_ascii_hexdigit()),
-        None => false,
-    }
+    is_hex_string(value, 40)
 }
 
 /// Look like a transaction hash: `0x` followed by 64 hex digits.
 fn looks_like_tx_hash(value: &str) -> bool {
-    let rest = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"));
-    match rest {
-        Some(hex) => hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()),
-        None => false,
-    }
+    is_hex_string(value, 64)
 }
 
 /// Validate a batch of records, including cross-record duplicate detection.
@@ -137,25 +152,24 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
         }
 
         // Amount: when present, must parse as u128 and be positive on success.
-        if let Some(parsed) = record.amount_atomic() {
-            match parsed {
-                Ok(value) => {
-                    if record.success && value == 0 {
-                        report.push(Issue {
-                            index,
-                            code: "zero-amount",
-                            severity: Severity::Warning,
-                            message: "successful settlement has zero amount".into(),
-                        });
-                    }
+        match record.amount_atomic() {
+            Ok(Some(value)) => {
+                if record.success && value == 0 {
+                    report.push(Issue {
+                        index,
+                        code: "zero-amount",
+                        severity: Severity::Warning,
+                        message: "successful settlement has zero amount".into(),
+                    });
                 }
-                Err(_) => report.push(Issue {
-                    index,
-                    code: "invalid-amount",
-                    severity: Severity::Error,
-                    message: format!("amount is not a non-negative integer: {:?}", record.amount),
-                }),
             }
+            Ok(None) => {}
+            Err(_) => report.push(Issue {
+                index,
+                code: "invalid-amount",
+                severity: Severity::Error,
+                message: format!("amount is not a non-negative integer: {:?}", record.amount),
+            }),
         }
 
         // Payer address, when present.

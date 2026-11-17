@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `report --format csv` now emits a single flat table with a leading `section`
+  column (`summary` / `issue`) instead of two concatenated CSV tables with
+  different headers. All rows share one header and column count.
+- `SettlementRecord::amount_atomic()` returns `Result<Option<u128>, _>` instead
+  of `Option<Result<u128, _>>` — one layer instead of two. (`pub` API change.)
+
 ### Fixed
+
+- `summary` by-day grouping now normalizes timestamps to UTC before taking the
+  calendar date. A ledger mixing offsets no longer splits/merges settlement
+  days incorrectly.
+- CI now really verifies the declared MSRV: a `1.88` job runs `cargo check
+  --locked --all-targets`, so a dependency silently raising the floor is caught.
 
 - `report --format json` now emits **one** valid JSON document
   (`{"summary": ..., "validation": ...}`) instead of two concatenated objects
@@ -29,9 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (submission artifact).
 - README: Configuration and Known limitations sections.
 
-- Regression tests for JSON report parseability and amount overflow.
+- Regression tests for JSON report parseability, amount overflow, UTC day
+  grouping and single-header CSV reports.
+- `ValidationReport::from_issues()` constructor: severity counting lives in one
+  place instead of being recomputed by hand in the CLI.
 
-**Test count: 47 (34 unit + 13 integration).**
+**Test count: 49 (35 unit + 14 integration). Verified on stable and MSRV 1.88.**
 
 ## [0.1.0] - 2026-11-17
 

@@ -27,3 +27,17 @@ jobs:
         run: cargo test --locked
       - name: Build release
         run: cargo build --release --locked
+
+  msrv:
+    name: MSRV 1.88 check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Must use a real old toolchain: `rust-version` in Cargo.toml is only a
+      # declaration. CI on stable can't catch a dependency silently raising it.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      - name: Check with minimum supported Rust
+        run: cargo check --locked --all-targets

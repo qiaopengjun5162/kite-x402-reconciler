@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 use crate::model::SettlementRecord;
-use crate::reconcile::Summary;
+use crate::reconcile::{Summary, Totals};
 use crate::validate::ValidationReport;
 
 /// Output format selected on the CLI.
@@ -168,13 +168,80 @@ pub fn render_full_report(
             summary,
             validation,
         }),
-        Format::Text | Format::Csv => {
+        Format::Csv => render_full_report_csv(summary, validation),
+        // Text is for humans, so two labelled sections read better than one
+        // wide table. CSV/JSON are machine-facing and stay single-structure.
+        Format::Text => {
             let mut body = render_summary(summary, format);
             body.push('\n');
             body.push_str(&render_validation(validation, format));
             body
         }
     }
+}
+
+/// One flat CSV table for the whole report: a `section` column marks each row
+/// as a summary group or an issue, so a single header covers every row.
+/// Concatenating two CSV tables with different headers was not parseable.
+fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> String {
+    fn csv_row(fields: &[String]) -> String {
+        let mut line = fields.join(",");
+        line.push('\n');
+        line
+    }
+
+    let mut out = String::from(
+        "section,group,key,count,succeeded,failed,amount_atomic,amount_unavailable,issue_index,issue_code,issue_severity,issue_message\n",
+    );
+
+    let mut summary_row = |label: &str, key: &str, totals: &Totals| {
+        out.push_str(&csv_row(&[
+            "summary".into(),
+            label.into(),
+            csv_field(key),
+            totals.count.to_string(),
+            totals.succeeded.to_string(),
+            totals.failed.to_string(),
+            totals.amount_atomic.to_string(),
+            totals.amount_unavailable.to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]));
+    };
+
+    summary_row("total", "(all)", &summary.total);
+    for (label, groups) in [
+        ("network", &summary.by_network),
+        ("payer", &summary.by_payer),
+        ("day", &summary.by_day),
+    ] {
+        for (key, totals) in groups {
+            summary_row(label, key, totals);
+        }
+    }
+
+    for issue in &validation.issues {
+        out.push_str(&csv_row(&[
+            "issue".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            issue.index.to_string(),
+            csv_field(issue.code),
+            csv_field(match issue.severity {
+                crate::validate::Severity::Error => "error",
+                crate::validate::Severity::Warning => "warning",
+            }),
+            csv_field(&issue.message),
+        ]));
+    }
+    out
 }
 
 /// Render settlement records (used by `ingest` and `decode`).

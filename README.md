@@ -64,7 +64,7 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 |---|---|
 | `ingest` | Read and normalize records, re-emit as JSON/CSV/text |
 | `validate` | Report structural + semantic issues (`--strict` for CI) |
-| `summary` | Aggregate by network / payer / day (exact `u128`) |
+| `summary` | Aggregate by network / payer / day (exact `u128`); days are UTC calendar dates |
 | `duplicates` | Duplicate transactions + replayed nonces |
 | `report` | Summary + issues to a file (or stdout) |
 | `decode` | Decode a base64 `PAYMENT-RESPONSE` header |
@@ -87,6 +87,10 @@ is included for wrapper scripts and documents the optional hints
 - `network` validation checks the CAIP-2 **shape** (`namespace:reference`), not
   a chain-id allowlist. A syntactically valid but non-existent chain id will
   pass the check by design (so new Kite networks work without code changes).
+- `by_day` grouping converts each RFC 3339 timestamp to **UTC** first, then
+  takes the calendar date. A settlement at `23:30-05:00` counts as the next
+  UTC day; all payers are judged against the same clock. Without a timestamp,
+  the record falls into `(unknown)`.
 - Cross-record replay detection is scoped to the **current input batch**.
   Detecting nonces reused across days requires concatenating those ledgers
   into one input.

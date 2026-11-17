@@ -158,7 +158,7 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD.encode(inner);
         let record = decode_payment_response(&encoded).unwrap();
         assert!(record.success);
-        assert_eq!(record.amount_atomic(), Some(Ok(100)));
+        assert_eq!(record.amount_atomic(), Ok(Some(100)));
     }
 
     #[test]
