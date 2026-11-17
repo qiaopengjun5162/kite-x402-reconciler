@@ -72,11 +72,40 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 
 Every command accepts `--format text|json|csv` (defaults vary by command).
 
+## Configuration
+
+No environment variables are required — the tool is fully offline and every
+command takes its input via `--input` (file or stdin). A [`.env.example`](.env.example)
+is included for wrapper scripts and documents the optional hints
+(`KITE_NETWORK`, `KITE_TOKEN_DECIMALS`, `KITE_RECONCILER_INPUT/OUTPUT`).
+
+## Known limitations
+
+- The tool is **offline only**: it reconciles records you provide. It does not
+  call a Kite facilitator RPC or fetch on-chain state itself. Feed it records
+  exported from your service or captured `PAYMENT-RESPONSE` headers.
+- `network` validation checks the CAIP-2 **shape** (`namespace:reference`), not
+  a chain-id allowlist. A syntactically valid but non-existent chain id will
+  pass the check by design (so new Kite networks work without code changes).
+- Cross-record replay detection is scoped to the **current input batch**.
+  Detecting nonces reused across days requires concatenating those ledgers
+  into one input.
+- Amounts are summed in **atomic units** as `u128`. Values above `u128::MAX`
+  are rejected at parse time. Human-readable decimals are a display concern
+  (`format_atomic`); the CLI prints atomic units and does not assume a token's
+  decimals.
+- Some bookkeeping fields (`resource`, `timestamp`, `nonce`) are optional and
+  are not part of the facilitator's `SettleResponse`. When absent, day
+  grouping falls back to `(unknown)` and nonce replay detection is skipped.
+- `validate` flags a hash that isn't `0x` + 64 hex as a **warning**, not an
+  error, to stay compatible with test/mock facilitators that use short ids.
+
 ## Docs
 
 - [Design & five-repo comparison](docs/DESIGN.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Usage](docs/USAGE.md)
+- [Testing & deployment](docs/TESTING.md)
 - [Changelog](CHANGELOG.md)
 
 ## Quality

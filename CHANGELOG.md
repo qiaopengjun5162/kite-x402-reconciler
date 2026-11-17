@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `tests/cli.rs`: 12 end-to-end integration tests driving the real binary via
+  stdin/stdout (help, sample, validate strict pass/fail, summary, duplicates,
+  decode, CSV pipeline, full report) plus library boundary tests.
+- `docs/TESTING.md`: test commands, coverage matrix, build/deploy and
+  troubleshooting.
+- `demo.sh`: runnable end-to-end demonstration covering all six commands
+  (submission artifact).
+- README: Configuration and Known limitations sections.
+
+**Test count: 45 (33 unit + 12 integration).**
+
 ## [0.1.0] - 2026-11-17
 
 ### Added
