@@ -1,0 +1,22 @@
+[package]
+name = "kite-x402-reconciler"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+description = "Reconciliation and audit toolkit for Kite x402 settlement records"
+readme = "README.md"
+repository = "https://github.com/qiaopengjun5162/kite-x402-reconciler"
+keywords = ["x402", "kite", "settlement", "audit", "cli"]
+categories = ["command-line-utilities", "network-programming"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+base64 = "0.23"
+
+[lints.rust]
+unsafe_code = "forbid"
