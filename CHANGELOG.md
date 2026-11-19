@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Gate failures now exit `3` instead of `1`. `validate --strict` is kept as a
+  hidden alias for `--fail-on error` and follows the same code. `1` remains
+  "runtime failure" and `2` remains clap's usage error, so a wrapper can tell a
+  dirty ledger from a typo. See "Exit codes" in the README.
 - `report --format csv` now emits a single flat table with a leading `section`
   column (`summary` / `issue`) instead of two concatenated CSV tables with
   different headers. All rows share one header and column count.
@@ -34,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `--fail-on none|error|warning` on `validate`, `duplicates` and `report`: turns
+  findings into process exit status `3` so the CLI can gate a cron job or CI
+  step. `report` writes its artifact first, so a failing gate never costs the
+  operator the report.
+- `gate::FailOn` module: the threshold policy lives in one unit-tested place
+  instead of being recomputed per command.
+- Integration tests pinning the exit-code contract (`0`/`1`/`2`/`3`), the
+  report-still-written guarantee, and the `--strict` alias.
 - `tests/cli.rs`: 12 end-to-end integration tests driving the real binary via
   stdin/stdout (help, sample, validate strict pass/fail, summary, duplicates,
   decode, CSV pipeline, full report) plus library boundary tests.
@@ -48,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `ValidationReport::from_issues()` constructor: severity counting lives in one
   place instead of being recomputed by hand in the CLI.
 
-**Test count: 49 (35 unit + 14 integration). Verified on stable and MSRV 1.88.**
+**Test count: 59 (40 unit + 19 integration). Verified on stable and MSRV 1.88.**
 
 ## [0.1.0] - 2026-11-17
 

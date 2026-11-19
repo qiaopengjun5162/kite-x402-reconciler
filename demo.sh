@@ -36,4 +36,13 @@ echo "== 6. full JSON report =="
 echo "wrote /tmp/kxr-report.json ($(wc -c < /tmp/kxr-report.json) bytes)"
 
 echo
+echo "== 7. gate: --fail-on error exits 3, report still written =="
+set +e
+"$BIN" report --input /tmp/kxr-ledger.json --output /tmp/kxr-gated-report.json --format json --fail-on error
+STATUS=$?
+set -e
+echo "exit status: $STATUS (3 = gate failed)"
+echo "artifact on disk anyway: $(wc -c < /tmp/kxr-gated-report.json) bytes"
+
+echo
 echo "demo complete."

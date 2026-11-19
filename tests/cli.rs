@@ -225,3 +225,135 @@ fn library_format_atomic_boundaries() {
     assert_eq!(format_atomic(1, 18), "0.000000000000000001");
     assert_eq!(format_atomic(u64::MAX as u128, 0), u64::MAX.to_string());
 }
+
+// ---- exit-code contract (`--fail-on`) ----
+//
+// 0 = success, 1 = runtime failure, 2 = usage error (clap), 3 = gate failed.
+
+/// Unique scratch path so concurrently running tests never collide.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!("kxr-{}-{name}", std::process::id()));
+    path
+}
+
+/// A ledger with no errors but one warning (`zero-amount` on a success).
+const WARNING_ONLY_LEDGER: &str = r#"[{"success":true,"transaction":"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","network":"eip155:2424","amount":"0","payer":"0xdddddddddddddddddddddddddddddddddddddddd","timestamp":"2026-11-17T10:00:00Z"}]"#;
+
+#[test]
+fn cli_gate_codes_are_distinct_per_failure_kind() {
+    let sample = stdout_text(&run(&["sample", "--format", "json"], None));
+
+    // Clean run: no gate requested.
+    let ok = run(&["validate", "--input", "-"], Some(&sample));
+    assert_eq!(ok.status.code(), Some(0), "default is informational");
+
+    // Gate requested and tripped.
+    let gated = run(
+        &["validate", "--input", "-", "--fail-on", "error"],
+        Some(&sample),
+    );
+    assert_eq!(
+        gated.status.code(),
+        Some(3),
+        "gate failure has its own code"
+    );
+
+    // Runtime failure: unreadable input.
+    let missing = scratch("missing.json");
+    let runtime = run(&["validate", "--input", missing.to_str().unwrap()], None);
+    assert_eq!(
+        runtime.status.code(),
+        Some(1),
+        "io failure is not a gate failure"
+    );
+
+    // Usage error: unknown level, rejected by the parser before any work.
+    let usage = run(&["validate", "--fail-on", "bogus"], Some(&sample));
+    assert_eq!(usage.status.code(), Some(2), "clap keeps exit code 2");
+    let stderr = String::from_utf8_lossy(&usage.stderr);
+    assert!(stderr.contains("none, error, warning"), "{stderr}");
+}
+
+#[test]
+fn cli_report_gate_failure_still_writes_the_artifact() {
+    let ledger = scratch("gate-ledger.json");
+    let report = scratch("gate-report.json");
+    let sample = stdout_text(&run(&["sample", "--format", "json"], None));
+    std::fs::write(&ledger, sample).expect("write ledger");
+
+    let output = run(
+        &[
+            "report",
+            "--input",
+            ledger.to_str().unwrap(),
+            "--output",
+            report.to_str().unwrap(),
+            "--fail-on",
+            "error",
+        ],
+        None,
+    );
+
+    assert_eq!(output.status.code(), Some(3));
+    // The operator needs the artifact even when the gate trips.
+    let body = std::fs::read_to_string(&report).expect("report must be written before gating");
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid JSON report");
+    assert!(
+        parsed["validation"]["errors"].as_u64().unwrap_or(0) > 0,
+        "the sample ledger has a duplicate transaction: {body}"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("gate failed"));
+}
+
+#[test]
+fn cli_gate_threshold_separates_errors_from_warnings() {
+    // One warning, zero errors.
+    let lenient = run(
+        &["validate", "--input", "-", "--fail-on", "error"],
+        Some(WARNING_ONLY_LEDGER),
+    );
+    assert_eq!(
+        lenient.status.code(),
+        Some(0),
+        "warnings only: error gate passes"
+    );
+
+    let strict = run(
+        &["validate", "--input", "-", "--fail-on", "warning"],
+        Some(WARNING_ONLY_LEDGER),
+    );
+    assert_eq!(
+        strict.status.code(),
+        Some(3),
+        "warnings only: warning gate trips"
+    );
+}
+
+#[test]
+fn cli_duplicates_honours_the_gate() {
+    let sample = stdout_text(&run(&["sample", "--format", "json"], None));
+    let plain = run(&["duplicates", "--input", "-"], Some(&sample));
+    assert_eq!(plain.status.code(), Some(0));
+
+    let gated = run(
+        &["duplicates", "--input", "-", "--fail-on", "error"],
+        Some(&sample),
+    );
+    assert_eq!(gated.status.code(), Some(3));
+    assert!(stdout_text(&gated).contains("duplicate-transaction"));
+}
+
+#[test]
+fn cli_strict_alias_maps_to_fail_on_error() {
+    let sample = stdout_text(&run(&["sample", "--format", "json"], None));
+    let strict = run(&["validate", "--input", "-", "--strict"], Some(&sample));
+    assert_eq!(strict.status.code(), Some(3), "--strict == --fail-on error");
+
+    // `--strict` may only tighten, never relax, an explicit threshold.
+    let both = run(
+        &["validate", "--input", "-", "--strict", "--fail-on", "none"],
+        Some(&sample),
+    );
+    assert_eq!(both.status.code(), Some(3));
+}

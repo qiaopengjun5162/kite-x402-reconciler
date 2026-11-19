@@ -6,6 +6,7 @@
 //! base64-encoded `PAYMENT-RESPONSE` headers.
 
 pub mod errors;
+pub mod gate;
 pub mod ingest;
 pub mod model;
 pub mod reconcile;

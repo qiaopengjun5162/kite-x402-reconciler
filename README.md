@@ -36,8 +36,8 @@ Requires Rust 1.88+ (edition 2021).
 # 1. Generate a sample ledger (includes a deliberate duplicate transaction).
 kite-x402-reconciler sample --format json > ledger.json
 
-# 2. Validate it — exits non-zero in --strict mode if any error is found.
-kite-x402-reconciler validate --input ledger.json --strict
+# 2. Validate it — add --fail-on error to turn findings into a non-zero exit.
+kite-x402-reconciler validate --input ledger.json --fail-on error
 
 # 3. Aggregate totals by network / payer / day.
 kite-x402-reconciler summary --input ledger.json
@@ -45,8 +45,8 @@ kite-x402-reconciler summary --input ledger.json
 # 4. Find duplicate transactions and replayed nonces.
 kite-x402-reconciler duplicates --input ledger.json
 
-# 5. Write a full JSON report.
-kite-x402-reconciler report --input ledger.json --output report.json --format json
+# 5. Write a full JSON report (and still exit 3 if the ledger is dirty).
+kite-x402-reconciler report --input ledger.json --output report.json --format json --fail-on error
 
 # 6. Decode a PAYMENT-RESPONSE header from a real x402 response.
 kite-x402-reconciler decode 'eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YTFiMmMzZDRhMWIyYzNkNGExYjJjM2Q0YTFiMmMzZDRhMWIyYzNkNGExYjJjM2Q0YTFiMmMzZDRhMWIyYzNkNCIsIm5ldHdvcmsiOiJlaXAxNTU6MjQyNCIsImFtb3VudCI6IjE1MDAwMDAiLCJwYXllciI6IjB4OWY4ZTdkNmM1YjRhMzkyODE3MDY5ZjhlN2Q2YzViNGEzOTI4MTcwNiJ9'
@@ -63,7 +63,7 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 | Command | What it does |
 |---|---|
 | `ingest` | Read and normalize records, re-emit as JSON/CSV/text |
-| `validate` | Report structural + semantic issues (`--strict` for CI) |
+| `validate` | Report structural + semantic issues |
 | `summary` | Aggregate by network / payer / day (exact `u128`); days are UTC calendar dates |
 | `duplicates` | Duplicate transactions + replayed nonces |
 | `report` | Summary + issues to a file (or stdout) |
@@ -71,6 +71,36 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 | `sample` | Print a sample ledger for demos/tests |
 
 Every command accepts `--format text|json|csv` (defaults vary by command).
+`validate`, `duplicates` and `report` also accept `--fail-on none|error|warning`
+(default `none`).
+
+## Exit codes
+
+The tool is meant to run unattended, so the status codes are a contract:
+
+| Code | Meaning |
+|---|---|
+| `0` | Ran, and the ledger met the requested threshold |
+| `1` | Runtime failure (unreadable input, malformed ledger, write error) |
+| `2` | Usage error (unknown flag or bad value) |
+| `3` | Gate failed: findings at or above `--fail-on` |
+
+`report` writes the artifact **before** applying the gate, so a failing run
+still leaves a report on disk:
+
+```bash
+# Cron/CI: always produce the report, alert only on a dirty ledger.
+kite-x402-reconciler report --input /var/lib/x402/today.jsonl \
+  --output /var/lib/x402/reports/today.json --fail-on error
+case $? in
+  0) echo "clean" ;;
+  3) echo "ledger needs review" ; exit 1 ;;
+  *) echo "reconciler broke" ; exit 1 ;;
+esac
+```
+
+`validate --strict` is the deprecated spelling of `--fail-on error`. It can only
+tighten the threshold, never relax it.
 
 ## Configuration
 

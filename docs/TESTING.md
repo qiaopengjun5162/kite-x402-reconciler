@@ -26,7 +26,7 @@ cargo clippy --all-targets -- -D warnings
 | `validate` (unit) | success/reason consistency, network, amount, tx hash, payer, timestamp, duplicate transaction, replayed nonce (same vs different payer), empty batch |
 | `reconcile` (unit) | totals and group-by, failed/invalid amounts excluded, `format_atomic` exactness and boundaries |
 | `report` (unit) | RFC 4180 CSV escaping, format parsing, validation/summary/record rendering in text/JSON/CSV |
-| `tests/cli.rs` (integration) | `--help`, `sample` JSON, `validate --strict` exit codes (pass + fail), `summary` via stdin, duplicate nonce detection, header decode, CSV pipeline, full report |
+| `tests/cli.rs` (integration) | `--help`, `sample` JSON, `validate --strict` / `--fail-on` exit-code contract (`0`/`1`/`2`/`3`), report-still-written on a failing gate, `summary` via stdin, duplicate nonce detection, header decode, CSV pipeline, full report |
 
 ## Build & deploy
 
@@ -46,7 +46,8 @@ release build on every push/PR to `main`/`master`.
 
 | Symptom | Cause / fix |
 |---|---|
-| `--strict` exits 1 with no visible issue on stdout | Issues are printed to stdout; check the terminal output above the shell prompt, or drop `--strict` to see them and still exit 0. |
+| `--strict` / `--fail-on` exits `3` with no visible issue on stdout | That is the gate code, not a crash. Issues are printed to stdout (above the shell prompt) and, for `report`, also stored in the artifact. `1` means the tool itself failed. |
+| `--fail-on bogus` exits `2` | `2` is the argument-parser code; use `none`, `error` or `warning`. |
 | `invalid-amount` on a value like `1.5` | `amount` must be an integer in atomic units (string), e.g. `1500000` for 1.5 tokens at 6 decimals. |
 | `invalid-network` on `eip155:2424` | Not expected — that is valid. Ensure there is no whitespace or a third `:`. |
 | `decode` says "invalid base64" | The header must be raw base64 of a JSON object, without the `PAYMENT-RESPONSE:` label; trim quotes. |
