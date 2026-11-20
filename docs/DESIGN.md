@@ -9,6 +9,8 @@
 - ✅ 公开仓库：https://github.com/qiaopengjun5162/kite-x402-reconciler
 - ✅ 首个 commit `00f40ca`，作者关联本人账号（github_login=qiaopengjun5162）
 - ✅ tag `v0.1.0` 已推送
+- ✅ tag `v0.2.0`（2026-11-20）：新增 `reconcile` 双子对账与 `--fail-on` 门禁，
+  **76 测试**（51 单元 + 25 集成），clippy 零警告，MSRV 1.88 实跑通过
 - ✅ 33 测试通过、fmt 干净、clippy 零警告、release 构建成功；六个子命令端到端验证通过
 - ✅ 质量加固（2026-11-17 第二批）：新增 12 个 CLI 端到端集成测试（共 45 测试）、
   `docs/TESTING.md`、`demo.sh` 运行演示、README 配置与已知限制章节；全部门禁通过。

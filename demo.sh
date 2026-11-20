@@ -4,10 +4,10 @@
 set -euo pipefail
 
 BIN="./target/release/kite-x402-reconciler"
-if [[ ! -x "$BIN" ]]; then
-  echo "building release binary first..."
-  cargo build --release --locked
-fi
+# Always build. Cargo is incremental, so this is nearly free when nothing
+# changed — and it removes the trap where a stale binary quietly demos the
+# previous version's behaviour.
+cargo build --release --locked
 
 echo "== 1. generate a sample ledger (contains a deliberate duplicate tx) =="
 "$BIN" sample > /tmp/kxr-ledger.json
@@ -36,7 +36,31 @@ echo "== 6. full JSON report =="
 echo "wrote /tmp/kxr-report.json ($(wc -c < /tmp/kxr-report.json) bytes)"
 
 echo
-echo "== 7. gate: --fail-on error exits 3, report still written =="
+echo "== 7. reconcile: our ledger vs the facilitator's export =="
+# Build a plausible facilitator export from the sample: drop the double-counted
+# transaction, change one amount, add a settlement we never recorded.
+python3 - /tmp/kxr-ledger.json > /tmp/kxr-facilitator.json <<'PY'
+import json, sys
+records = json.load(open(sys.argv[1]))
+seen, out = set(), []
+for record in records:
+    if not record.get("success"):
+        continue                       # a failed settlement has no on-chain tx
+    tx = record["transaction"]
+    if tx in seen:
+        continue                       # local double-counted this one
+    seen.add(tx)
+    if len(out) == 1:
+        record["amount"] = "400000"    # facilitator reports a different amount
+    out.append(record)
+out.append({"success": True, "transaction": "0x" + "f" * 64,
+            "network": "eip155:2424", "amount": "900000"})
+print(json.dumps(out, indent=2))
+PY
+"$BIN" reconcile --local /tmp/kxr-ledger.json --facilitator /tmp/kxr-facilitator.json
+
+echo
+echo "== 8. gate: --fail-on error exits 3, report still written =="
 set +e
 "$BIN" report --input /tmp/kxr-ledger.json --output /tmp/kxr-gated-report.json --format json --fail-on error
 STATUS=$?

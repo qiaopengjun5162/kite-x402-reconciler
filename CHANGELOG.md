@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Added
 
 - New `reconcile --local <file> --facilitator <file>` command: pairs two
@@ -17,8 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   pair) and counted as `skipped_failed`; a successful record without a
   transaction hash is a warning, not a silent skip. Supports the same
   `--fail-on` gate and exit code `3` as the other commands.
-- `FailOn::violated_counts(errors, warnings)` so a command that does not build a
-  `ValidationReport` still honours one threshold.
+- `--fail-on none|error|warning` on `validate`, `duplicates`, `reconcile` and
+  `report`: turns findings into process exit status `3` so the CLI can gate a
+  cron job or CI step. `report` writes its artifact first, so a failing gate
+  never costs the operator the report.
+- `gate::FailOn` module: the threshold policy lives in one unit-tested place
+  instead of being recomputed per command. `FailOn::violated_counts(errors,
+  warnings)` extends it to reports that do not build a `ValidationReport`.
+- `ValidationReport::from_issues()` constructor: severity counting lives in one
+  place instead of being recomputed by hand in the CLI.
+- Integration tests pinning the exit-code contract (`0`/`1`/`2`/`3`), the
+  report-still-written guarantee, the `--strict` alias, and the rule that an
+  unreadable input is `1`, never `3` — a broken input is not a finding.
+- Regression tests for JSON report parseability, amount overflow, UTC day
+  grouping, single-header CSV reports, and both directions of a ledger diff.
+- `tests/cli.rs`: end-to-end integration tests driving the real binary via
+  stdin/stdout.
+- `docs/TESTING.md`: test commands, coverage matrix, build/deploy and
+  troubleshooting.
+- `demo.sh`: runnable end-to-end demonstration covering every command
+  (submission artifact).
 
 ### Changed
 
@@ -39,7 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   days incorrectly.
 - CI now really verifies the declared MSRV: a `1.88` job runs `cargo check
   --locked --all-targets`, so a dependency silently raising the floor is caught.
-
 - `report --format json` now emits **one** valid JSON document
   (`{"summary": ..., "validation": ...}`) instead of two concatenated objects
   that no JSON parser could read. New regression test parses the output.
@@ -49,31 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - README `decode` quick-start example used a fake base64 payload that always
   failed; replaced with a real, parseable `PAYMENT-RESPONSE` header.
 
-### Added
-
-- `--fail-on none|error|warning` on `validate`, `duplicates` and `report`: turns
-  findings into process exit status `3` so the CLI can gate a cron job or CI
-  step. `report` writes its artifact first, so a failing gate never costs the
-  operator the report.
-- `gate::FailOn` module: the threshold policy lives in one unit-tested place
-  instead of being recomputed per command.
-- Integration tests pinning the exit-code contract (`0`/`1`/`2`/`3`), the
-  report-still-written guarantee, and the `--strict` alias.
-- `tests/cli.rs`: 12 end-to-end integration tests driving the real binary via
-  stdin/stdout (help, sample, validate strict pass/fail, summary, duplicates,
-  decode, CSV pipeline, full report) plus library boundary tests.
-- `docs/TESTING.md`: test commands, coverage matrix, build/deploy and
-  troubleshooting.
-- `demo.sh`: runnable end-to-end demonstration covering all six commands
-  (submission artifact).
-- README: Configuration and Known limitations sections.
-
-- Regression tests for JSON report parseability, amount overflow, UTC day
-  grouping and single-header CSV reports.
-- `ValidationReport::from_issues()` constructor: severity counting lives in one
-  place instead of being recomputed by hand in the CLI.
-
-**Test count: 59 (40 unit + 19 integration). Verified on stable and MSRV 1.88.**
+**Test count: 76 (51 unit + 25 integration). Verified on stable and MSRV 1.88.**
 
 ## [0.1.0] - 2026-11-17
 
@@ -95,5 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Documentation: README, DESIGN (five-repo comparison), ARCHITECTURE, USAGE,
   `.env.example`, CHANGELOG, Apache-2.0 license, CI workflow.
 
-[Unreleased]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/qiaopengjun5162/kite-x402-reconciler/releases/tag/v0.1.0

@@ -32,6 +32,12 @@ impl std::str::FromStr for Format {
     }
 }
 
+/// Render an optional field for human output without leaking Rust's `Option`
+/// debug formatting (`Some("999")`) into a CLI the operator reads.
+fn shown(value: &Option<String>) -> &str {
+    value.as_deref().unwrap_or("(none)")
+}
+
 /// Escape one field for CSV per RFC 4180.
 fn csv_field(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
@@ -308,13 +314,12 @@ pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
             }
 
             out.push_str("\nAmount mismatches:\n");
-            let show = |value: &Option<String>| value.as_deref().unwrap_or("(none)").to_owned();
             for mismatch in &diff.amount_mismatch {
                 out.push_str(&format!(
                     "  {} local={} facilitator={}\n",
                     mismatch.transaction,
-                    show(&mismatch.local_amount),
-                    show(&mismatch.facilitator_amount)
+                    shown(&mismatch.local_amount),
+                    shown(&mismatch.facilitator_amount)
                 ));
             }
             for (label, entries) in [
@@ -327,8 +332,8 @@ pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
                         "  {} network={} amount={} payer={}\n",
                         entry.transaction,
                         entry.network,
-                        show(&entry.amount),
-                        show(&entry.payer)
+                        shown(&entry.amount),
+                        shown(&entry.payer)
                     ));
                 }
             }
@@ -373,11 +378,11 @@ pub fn render_records(records: &[SettlementRecord], format: Format) -> String {
             let mut out = String::new();
             for (index, record) in records.iter().enumerate() {
                 out.push_str(&format!(
-                    "Record #{index}: {} tx={} network={} amount={:?}\n",
+                    "Record #{index}: {} tx={} network={} amount={}\n",
                     if record.success { "OK  " } else { "FAIL" },
                     record.transaction,
                     record.network,
-                    record.amount
+                    shown(&record.amount)
                 ));
             }
             out
