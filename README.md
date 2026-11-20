@@ -66,13 +66,53 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 | `validate` | Report structural + semantic issues |
 | `summary` | Aggregate by network / payer / day (exact `u128`); days are UTC calendar dates |
 | `duplicates` | Duplicate transactions + replayed nonces |
+| `reconcile` | Compare a local ledger against the facilitator's, matched on transaction hash |
 | `report` | Summary + issues to a file (or stdout) |
 | `decode` | Decode a base64 `PAYMENT-RESPONSE` header |
 | `sample` | Print a sample ledger for demos/tests |
 
 Every command accepts `--format text|json|csv` (defaults vary by command).
-`validate`, `duplicates` and `report` also accept `--fail-on none|error|warning`
-(default `none`).
+`validate`, `duplicates`, `reconcile` and `report` also accept
+`--fail-on none|error|warning` (default `none`).
+
+## Two-ledger reconciliation
+
+`summary` and `duplicates` audit **one** ledger — they answer "is this ledger
+self-consistent". They cannot answer "does it agree with what the facilitator
+actually settled", and that is the question that costs money. `reconcile` takes
+two ledgers and pairs them on the settlement transaction hash:
+
+```bash
+kite-x402-reconciler reconcile \
+  --local /var/lib/x402/our-records.jsonl \
+  --facilitator /var/lib/x402/facilitator-export.jsonl \
+  --fail-on error
+```
+
+Three kinds of finding come out, and each has a different operational meaning:
+
+| Finding | What it means | Why it is an error |
+|---|---|---|
+| `only_local` | Your service recorded a settlement the facilitator has no record of | You are billing/delivering against revenue that does not exist |
+| `only_facilitator` | The facilitator settled something your service never recorded | The buyer paid for a request you may not have served, and a retry charges them twice |
+| `amount_mismatch` | Both sides saw the same transaction but disagree on the amount | Your accounting and the chain disagree |
+
+Matching details worth knowing before you trust the output:
+
+- Hashes are compared after trimming whitespace and lowercasing, because hex
+  reaches the tool from hand-edited exports and mixed-case logs.
+- **Failed settlements are excluded** from matching and reported as
+  `skipped_failed`. A failed `SettleResponse` has no on-chain transaction, so
+  pairing it against the other side's silence would report every failure as two
+  discrepancies. This is the single most important rule: a naive diff of a
+  production ledger is mostly failures.
+- A **successful** record with an empty transaction hash is different — it
+  claims a settlement that cannot be identified. That is a warning
+  (`skipped_unidentified`), not a silent skip, and it is the only thing
+  `--fail-on warning` catches that `--fail-on error` does not.
+- Duplicate transactions pair in input order; the surplus copy on the longer
+  side becomes a one-sided finding instead of disappearing.
+
 
 ## Exit codes
 
@@ -112,8 +152,9 @@ is included for wrapper scripts and documents the optional hints
 ## Known limitations
 
 - The tool is **offline only**: it reconciles records you provide. It does not
-  call a Kite facilitator RPC or fetch on-chain state itself. Feed it records
-  exported from your service or captured `PAYMENT-RESPONSE` headers.
+  call a Kite facilitator RPC or fetch on-chain state itself. `reconcile` closes
+  the gap between *your* records and *the facilitator's* records, but you still
+  supply both exports.
 - `network` validation checks the CAIP-2 **shape** (`namespace:reference`), not
   a chain-id allowlist. A syntactically valid but non-existent chain id will
   pass the check by design (so new Kite networks work without code changes).

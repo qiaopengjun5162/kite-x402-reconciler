@@ -31,10 +31,21 @@ impl FailOn {
     /// True when `report` holds a finding at or above this threshold.
     #[must_use]
     pub fn violated(self, report: &ValidationReport) -> bool {
+        self.violated_counts(report.errors, report.warnings)
+    }
+
+    /// Same rule as [`Self::violated`], for reports that count findings
+    /// themselves.
+    ///
+    /// `reconcile` produces a [`LedgerDiff`](crate::diff::LedgerDiff) rather
+    /// than a [`ValidationReport`], but it must honour the same `--fail-on`
+    /// contract: one threshold, one meaning of "dirty", across every command.
+    #[must_use]
+    pub fn violated_counts(self, errors: usize, warnings: usize) -> bool {
         match self {
             Self::None => false,
-            Self::Error => report.errors > 0,
-            Self::Warning => report.errors > 0 || report.warnings > 0,
+            Self::Error => errors > 0,
+            Self::Warning => errors > 0 || warnings > 0,
         }
     }
 

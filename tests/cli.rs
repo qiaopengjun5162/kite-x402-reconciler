@@ -51,6 +51,7 @@ fn cli_help_lists_all_commands() {
         "summary",
         "duplicates",
         "report",
+        "reconcile",
         "decode",
         "sample",
     ] {
@@ -356,4 +357,209 @@ fn cli_strict_alias_maps_to_fail_on_error() {
         Some(&sample),
     );
     assert_eq!(both.status.code(), Some(3));
+}
+
+// ---------------------------------------------------------------------------
+// `reconcile`: local ledger vs facilitator ledger
+// ---------------------------------------------------------------------------
+
+/// A ledger file in the system temp dir that deletes itself on drop.
+struct TempLedger(std::path::PathBuf);
+
+impl TempLedger {
+    fn new(name: &str, body: &str) -> Self {
+        let mut path = std::env::temp_dir();
+        path.push(format!("kx402-cli-{}-{name}.json", std::process::id()));
+        std::fs::write(&path, body).expect("write temp ledger");
+        Self(path)
+    }
+
+    fn path(&self) -> &str {
+        self.0.to_str().expect("utf-8 temp path")
+    }
+}
+
+impl Drop for TempLedger {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+const LOCAL_LEDGER: &str = r#"[
+  {"success":true,"transaction":"0xAAA1","network":"eip155:2424","amount":"1500000"},
+  {"success":true,"transaction":"0xAAA2","network":"eip155:2424","amount":"500000"},
+  {"success":true,"transaction":"0xAAA3","network":"eip155:2424","amount":"250000"},
+  {"success":false,"transaction":"","network":"eip155:2424","errorReason":"insufficient_funds"}
+]"#;
+
+const FACILITATOR_LEDGER: &str = r#"[
+  {"success":true,"transaction":"0xaaa1","network":"eip155:2424","amount":"1500000"},
+  {"success":true,"transaction":"0xAAA2","network":"eip155:2424","amount":"400000"},
+  {"success":true,"transaction":"0xAAA4","network":"eip155:2424","amount":"900000"}
+]"#;
+
+#[test]
+fn cli_reconcile_reports_both_directions_and_mismatches() {
+    let local = TempLedger::new("local", LOCAL_LEDGER);
+    let facilitator = TempLedger::new("facilitator", FACILITATOR_LEDGER);
+
+    let output = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+        ],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(0), "no gate by default");
+
+    let text = stdout_text(&output);
+    // `0xAAA1` vs `0xaaa1` must still pair: hex case is not meaningful.
+    assert!(text.contains("Matched: 1"), "{text}");
+    assert!(
+        text.contains("0xAAA2 local=500000 facilitator=400000"),
+        "{text}"
+    );
+    assert!(
+        text.contains("0xAAA3"),
+        "local-only settlement missing: {text}"
+    );
+    assert!(
+        text.contains("0xAAA4"),
+        "facilitator-only settlement missing: {text}"
+    );
+    // The failed record has no on-chain settlement, so it is skipped, not diffed.
+    assert!(text.contains("1 failed"), "{text}");
+}
+
+#[test]
+fn cli_reconcile_gate_uses_exit_code_3() {
+    let local = TempLedger::new("gate-local", LOCAL_LEDGER);
+    let facilitator = TempLedger::new("gate-facilitator", FACILITATOR_LEDGER);
+
+    let gated = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--fail-on",
+            "error",
+        ],
+        None,
+    );
+    assert_eq!(gated.status.code(), Some(3));
+    assert!(stdout_text(&gated).contains("amount mismatches"));
+}
+
+#[test]
+fn cli_reconcile_clean_pair_exits_zero_under_any_threshold() {
+    let ledger = r#"[{"success":true,"transaction":"0xaa","network":"eip155:2424","amount":"1"}]"#;
+    let local = TempLedger::new("clean-local", ledger);
+    let facilitator = TempLedger::new("clean-facilitator", ledger);
+
+    for level in ["none", "error", "warning"] {
+        let output = run(
+            &[
+                "reconcile",
+                "--local",
+                local.path(),
+                "--facilitator",
+                facilitator.path(),
+                "--fail-on",
+                level,
+            ],
+            None,
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "fail-on={level} on a clean pair"
+        );
+    }
+}
+
+#[test]
+fn cli_reconcile_json_is_one_parseable_document() {
+    let local = TempLedger::new("json-local", LOCAL_LEDGER);
+    let facilitator = TempLedger::new("json-facilitator", FACILITATOR_LEDGER);
+
+    let output = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--format",
+            "json",
+        ],
+        None,
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout_text(&output)).expect("reconcile JSON must parse");
+    assert_eq!(value["matched"], 1);
+    assert_eq!(value["amount_mismatch"].as_array().unwrap().len(), 1);
+    assert_eq!(value["only_local"].as_array().unwrap().len(), 1);
+    assert_eq!(value["only_facilitator"].as_array().unwrap().len(), 1);
+    assert_eq!(value["skipped_failed"], 1);
+}
+
+#[test]
+fn cli_reconcile_unidentified_success_is_a_warning_not_an_error() {
+    let local = TempLedger::new(
+        "unidentified-local",
+        r#"[{"success":true,"transaction":"","network":"eip155:2424","amount":"1"}]"#,
+    );
+    let facilitator = TempLedger::new("unidentified-facilitator", "[]");
+
+    // No errors, one warning: `--fail-on error` passes, `--fail-on warning` trips.
+    let at_error = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--fail-on",
+            "error",
+        ],
+        None,
+    );
+    assert_eq!(at_error.status.code(), Some(0));
+
+    let at_warning = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--fail-on",
+            "warning",
+        ],
+        None,
+    );
+    assert_eq!(at_warning.status.code(), Some(3));
+    assert!(stdout_text(&at_warning).contains("WARNING"));
+}
+
+#[test]
+fn cli_reconcile_missing_file_is_a_runtime_failure() {
+    let local = TempLedger::new("missing-local", "[]");
+    let output = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            "/nonexistent/kite-x402-reconciler/facilitator.json",
+        ],
+        None,
+    );
+    // 1 (runtime failure), never 3 (gate): an unreadable input is not a finding.
+    assert_eq!(output.status.code(), Some(1));
 }

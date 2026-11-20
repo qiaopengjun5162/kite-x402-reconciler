@@ -12,14 +12,17 @@ kite-x402-reconciler sample > ledger.json
 # Inspect / normalize.
 kite-x402-reconciler ingest --input ledger.json --format csv
 
-# Check validity (CI-friendly: --strict exits 1 on any error).
-kite-x402-reconciler validate --input ledger.json --format text --strict
+# Check validity (CI-friendly: --fail-on error exits 3 on any error).
+kite-x402-reconciler validate --input ledger.json --format text --fail-on error
 
 # Money view.
 kite-x402-reconciler summary --input ledger.json --format json
 
 # Security view.
 kite-x402-reconciler duplicates --input ledger.json
+
+# Two-ledger view: does our ledger agree with the facilitator's?
+kite-x402-reconciler reconcile --local ledger.json --facilitator facilitator-export.jsonl
 
 # Everything to one file.
 kite-x402-reconciler report --input ledger.json --output report.json

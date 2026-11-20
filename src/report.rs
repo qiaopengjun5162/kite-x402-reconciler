@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 
+use crate::diff::LedgerDiff;
 use crate::model::SettlementRecord;
 use crate::reconcile::{Summary, Totals};
 use crate::validate::ValidationReport;
@@ -242,6 +243,98 @@ fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> S
         ]));
     }
     out
+}
+
+/// Render a local-vs-facilitator reconciliation.
+///
+/// JSON is the whole [`LedgerDiff`]; CSV is a flat findings table with a
+/// `section` column, so one header covers all three finding kinds. Totals live
+/// in JSON and in the text header — CSV carries only rows that need action.
+pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
+    match format {
+        Format::Json => to_json_pretty(diff),
+        Format::Csv => {
+            let mut out =
+                String::from("section,transaction,local_amount,facilitator_amount,network,payer\n");
+            let optional = |value: &Option<String>| csv_field(value.as_deref().unwrap_or(""));
+            for mismatch in &diff.amount_mismatch {
+                out.push_str(&format!(
+                    "amount_mismatch,{},{},{},,\n",
+                    csv_field(&mismatch.transaction),
+                    optional(&mismatch.local_amount),
+                    optional(&mismatch.facilitator_amount)
+                ));
+            }
+            for (section, entries) in [
+                ("only_local", &diff.only_local),
+                ("only_facilitator", &diff.only_facilitator),
+            ] {
+                for entry in entries {
+                    let amount = optional(&entry.amount);
+                    let (local, facilitator) = if section == "only_local" {
+                        (amount.clone(), String::new())
+                    } else {
+                        (String::new(), amount)
+                    };
+                    out.push_str(&format!(
+                        "{section},{},{local},{facilitator},{},{}\n",
+                        csv_field(&entry.transaction),
+                        csv_field(&entry.network),
+                        optional(&entry.payer)
+                    ));
+                }
+            }
+            out
+        }
+        Format::Text => {
+            let mut out = format!(
+                "Local records: {} | facilitator records: {} | compared: {}\n\
+                 Matched: {} | amount mismatches: {} | only local: {} | only facilitator: {}\n\
+                 Skipped: {} failed (no on-chain settlement), {} without a transaction hash\n",
+                diff.local_records,
+                diff.facilitator_records,
+                diff.compared,
+                diff.matched,
+                diff.amount_mismatch.len(),
+                diff.only_local.len(),
+                diff.only_facilitator.len(),
+                diff.skipped_failed,
+                diff.skipped_unidentified
+            );
+            if diff.skipped_unidentified > 0 {
+                out.push_str(
+                    "WARNING: successful records without a transaction hash were NOT reconciled.\n",
+                );
+            }
+
+            out.push_str("\nAmount mismatches:\n");
+            let show = |value: &Option<String>| value.as_deref().unwrap_or("(none)").to_owned();
+            for mismatch in &diff.amount_mismatch {
+                out.push_str(&format!(
+                    "  {} local={} facilitator={}\n",
+                    mismatch.transaction,
+                    show(&mismatch.local_amount),
+                    show(&mismatch.facilitator_amount)
+                ));
+            }
+            for (label, entries) in [
+                ("Only in local:", &diff.only_local),
+                ("Only in facilitator:", &diff.only_facilitator),
+            ] {
+                out.push_str(&format!("\n{label}\n"));
+                for entry in entries {
+                    out.push_str(&format!(
+                        "  {} network={} amount={} payer={}\n",
+                        entry.transaction,
+                        entry.network,
+                        show(&entry.amount),
+                        show(&entry.payer)
+                    ));
+                }
+            }
+            out
+        }
+    }
 }
 
 /// Render settlement records (used by `ingest` and `decode`).

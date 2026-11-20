@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- New `reconcile --local <file> --facilitator <file>` command: pairs two
+  ledgers on the settlement transaction hash and reports `only_local`,
+  `only_facilitator` and `amount_mismatch`. This is the command the tool's name
+  always implied — every other command only audits a single ledger. Failed
+  settlements are excluded from matching (no on-chain transaction exists to
+  pair) and counted as `skipped_failed`; a successful record without a
+  transaction hash is a warning, not a silent skip. Supports the same
+  `--fail-on` gate and exit code `3` as the other commands.
+- `FailOn::violated_counts(errors, warnings)` so a command that does not build a
+  `ValidationReport` still honours one threshold.
+
 ### Changed
 
 - Gate failures now exit `3` instead of `1`. `validate --strict` is kept as a

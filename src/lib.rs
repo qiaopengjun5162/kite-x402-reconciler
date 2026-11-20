@@ -5,6 +5,7 @@
 //! crate works with real x402 settlement output: JSON/JSONL ledgers and
 //! base64-encoded `PAYMENT-RESPONSE` headers.
 
+pub mod diff;
 pub mod errors;
 pub mod gate;
 pub mod ingest;

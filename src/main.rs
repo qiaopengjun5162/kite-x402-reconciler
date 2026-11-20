@@ -6,11 +6,12 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use kite_x402_reconciler::diff::reconcile as reconcile_ledgers;
 use kite_x402_reconciler::gate::FailOn;
 use kite_x402_reconciler::ingest::{decode_payment_response, read_records};
 use kite_x402_reconciler::reconcile::summarize;
 use kite_x402_reconciler::report::{
-    render_full_report, render_records, render_summary, render_validation, Format,
+    render_diff, render_full_report, render_records, render_summary, render_validation, Format,
 };
 use kite_x402_reconciler::sample_records;
 use kite_x402_reconciler::validate::{validate_all, ValidationReport};
@@ -89,6 +90,22 @@ enum Command {
         /// Exit with status 3 when findings reach this severity
         /// (`none`, `error`, `warning`). The report is still written before the
         /// status is reported.
+        #[arg(long, default_value = "none", value_parser = FailOn::from_str)]
+        fail_on: FailOn,
+    },
+    /// Compare a local ledger against the facilitator's ledger, matching on
+    /// settlement transaction hash.
+    Reconcile {
+        /// Ledger your service recorded.
+        #[arg(long)]
+        local: PathBuf,
+        /// Ledger the facilitator reports (e.g. an export of `/settle` responses).
+        #[arg(long)]
+        facilitator: PathBuf,
+        #[arg(short, long, default_value = "text")]
+        format: Format,
+        /// Exit with status 3 when findings reach this severity
+        /// (`none`, `error`, `warning`).
         #[arg(long, default_value = "none", value_parser = FailOn::from_str)]
         fail_on: FailOn,
     },
@@ -185,6 +202,20 @@ fn run() -> Result<ExitCode> {
             // a report on disk for the operator to inspect.
             Ok(gate(fail_on, &report))
         }
+        Command::Reconcile {
+            local,
+            facilitator,
+            format,
+            fail_on,
+        } => {
+            let local_records = read_records(Some(&local))
+                .with_context(|| format!("failed to read {}", local.display()))?;
+            let facilitator_records = read_records(Some(&facilitator))
+                .with_context(|| format!("failed to read {}", facilitator.display()))?;
+            let diff = reconcile_ledgers(&local_records, &facilitator_records);
+            print!("{}", render_diff(&diff, format));
+            Ok(gate_counts(fail_on, diff.errors(), diff.warnings()))
+        }
         Command::Decode { header, format } => {
             let value = match header {
                 Some(value) => value,
@@ -212,11 +243,17 @@ fn run() -> Result<ExitCode> {
 /// Called only after the command's own output has been emitted, so a failing
 /// gate never costs the operator the artifact.
 fn gate(policy: FailOn, report: &ValidationReport) -> ExitCode {
-    if policy.violated(report) {
+    gate_counts(policy, report.errors, report.warnings)
+}
+
+/// Gate on raw finding counts, for commands that do not produce a
+/// [`ValidationReport`] (`reconcile`).
+fn gate_counts(policy: FailOn, errors: usize, warnings: usize) -> ExitCode {
+    if policy.violated_counts(errors, warnings) {
         eprintln!(
             "gate failed: {} error(s), {} warning(s) at fail-on={}",
-            report.errors,
-            report.warnings,
+            errors,
+            warnings,
             policy.as_str()
         );
         ExitCode::from(EXIT_GATE_FAILED)
