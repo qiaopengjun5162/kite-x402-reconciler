@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-21
+
 ### Fixed
 
 - `reconcile` treated a transaction hash as a complete settlement identity, so
