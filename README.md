@@ -66,7 +66,7 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 | `validate` | Report structural + semantic issues |
 | `summary` | Aggregate by network / payer / day (exact `u128`); days are UTC calendar dates |
 | `duplicates` | Duplicate transactions + replayed nonces |
-| `reconcile` | Compare a local ledger against the facilitator's, matched on transaction hash |
+| `reconcile` | Compare a local ledger against the facilitator's, matched on transaction hash + CAIP-2 network |
 | `report` | Summary + issues to a file (or stdout) |
 | `decode` | Decode a base64 `PAYMENT-RESPONSE` header |
 | `sample` | Print a sample ledger for demos/tests |
@@ -89,18 +89,24 @@ kite-x402-reconciler reconcile \
   --fail-on error
 ```
 
-Three kinds of finding come out, and each has a different operational meaning:
+Four kinds of finding come out, and each has a different operational meaning:
 
 | Finding | What it means | Why it is an error |
 |---|---|---|
 | `only_local` | Your service recorded a settlement the facilitator has no record of | You are billing/delivering against revenue that does not exist |
 | `only_facilitator` | The facilitator settled something your service never recorded | The buyer paid for a request you may not have served, and a retry charges them twice |
 | `amount_mismatch` | Both sides saw the same transaction but disagree on the amount | Your accounting and the chain disagree |
+| `network_mismatch` | The same hash is recorded against a different CAIP-2 chain | The payment landed on another chain; billing and delivery driven off your ledger point at the wrong network |
 
 Matching details worth knowing before you trust the output:
 
 - Hashes are compared after trimming whitespace and lowercasing, because hex
-  reaches the tool from hand-edited exports and mixed-case logs.
+  reaches the tool from hand-edited exports and mixed-case logs. The CAIP-2
+  network must agree too — the same hash on another chain is not the same
+  payment. Network strings are trimmed but **not** case-folded, because CAIP-2
+  references may be case-sensitive. A network mismatch is reported instead of
+  an amount mismatch when both differ: there is no single settlement whose
+  amount could be right.
 - **Failed settlements are excluded** from matching and reported as
   `skipped_failed`. A failed `SettleResponse` has no on-chain transaction, so
   pairing it against the other side's silence would report every failure as two

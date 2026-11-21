@@ -115,6 +115,7 @@ SettleResponse {
 | R2 | 按天归并改 UTC 归一；CSV 双表头改单表头 + `section` 列；`amount_atomic` 两层 `Option<Result>` 收成一层；CI 真跑 1.88 验 MSRV | 收紧契约 |
 | R3 | `--fail-on none\|error\|warning` 门禁 + 退出码 `3`（避开 clap 的 `2`），`--strict` 降级为隐藏别名且只能收紧 | 功能 |
 | R4 | 新增 `reconcile` 双子命令：本地台账 vs facilitator 台账按交易哈希配对，输出 `only_local` / `only_facilitator` / `amount_mismatch` | 功能 |
+| R5 | `reconcile` 增加 CAIP-2 网络一致性检查：同 hash 不同链不再算匹配，新增 `network_mismatch` 发现类型并纳入 error 门禁 | 缺陷 |
 
 ### R4 的设计取舍
 
@@ -125,3 +126,4 @@ SettleResponse {
 1. **失败结算不参与配对**。失败的 `SettleResponse` 没有链上交易，拿它去对另一侧的「没有」会把每一次失败记成两条差异。真实台账里失败占多数，naive diff 的输出基本全是噪声。改为计入 `skipped_failed`，只报数量。
 2. **「成功但没有交易哈希」是缺陷，不是噪声**。它声称成交了却无法识别，必须冒泡为 warning，否则会静默漏出对账范围。
 3. **配对按输入顺序，多余的一份变成单边发现**。想做得更聪明（按金额配对）反而会把「同 hash 重复入账」这个真实问题藏起来。
+4. **网络不一致优先于金额不一致**（R5 补充）。交易哈希只在单条链内唯一；同一 hash 出现在另一条 CAIP-2 网络上，不是同一笔结算。既然两笔记录根本不是同一笔，就不存在「哪个金额才对」的问题——只报 `network_mismatch`，不再叠加 `amount_mismatch`，否则一个 pair 会产出两个互相矛盾的结论。

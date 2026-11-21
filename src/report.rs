@@ -254,21 +254,30 @@ fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> S
 /// Render a local-vs-facilitator reconciliation.
 ///
 /// JSON is the whole [`LedgerDiff`]; CSV is a flat findings table with a
-/// `section` column, so one header covers all three finding kinds. Totals live
+/// `section` column, so one header covers all four finding kinds. Totals live
 /// in JSON and in the text header — CSV carries only rows that need action.
 pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
     match format {
         Format::Json => to_json_pretty(diff),
         Format::Csv => {
-            let mut out =
-                String::from("section,transaction,local_amount,facilitator_amount,network,payer\n");
+            let mut out = String::from(
+                "section,transaction,local_amount,facilitator_amount,network,facilitator_network,payer\n",
+            );
             let optional = |value: &Option<String>| csv_field(value.as_deref().unwrap_or(""));
             for mismatch in &diff.amount_mismatch {
                 out.push_str(&format!(
-                    "amount_mismatch,{},{},{},,\n",
+                    "amount_mismatch,{},{},{},,,\n",
                     csv_field(&mismatch.transaction),
                     optional(&mismatch.local_amount),
                     optional(&mismatch.facilitator_amount)
+                ));
+            }
+            for mismatch in &diff.network_mismatch {
+                out.push_str(&format!(
+                    "network_mismatch,{},,,{},{},\n",
+                    csv_field(&mismatch.transaction),
+                    csv_field(&mismatch.local_network),
+                    csv_field(&mismatch.facilitator_network)
                 ));
             }
             for (section, entries) in [
@@ -283,10 +292,10 @@ pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
                         (String::new(), amount)
                     };
                     out.push_str(&format!(
-                        "{section},{},{local},{facilitator},{},{}\n",
+                        "{section},{},{local},{facilitator},{},,{payer}\n",
                         csv_field(&entry.transaction),
                         csv_field(&entry.network),
-                        optional(&entry.payer)
+                        payer = optional(&entry.payer)
                     ));
                 }
             }
@@ -295,13 +304,14 @@ pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
         Format::Text => {
             let mut out = format!(
                 "Local records: {} | facilitator records: {} | compared: {}\n\
-                 Matched: {} | amount mismatches: {} | only local: {} | only facilitator: {}\n\
+                 Matched: {} | amount mismatches: {} | network mismatches: {} | only local: {} | only facilitator: {}\n\
                  Skipped: {} failed (no on-chain settlement), {} without a transaction hash\n",
                 diff.local_records,
                 diff.facilitator_records,
                 diff.compared,
                 diff.matched,
                 diff.amount_mismatch.len(),
+                diff.network_mismatch.len(),
                 diff.only_local.len(),
                 diff.only_facilitator.len(),
                 diff.skipped_failed,
@@ -320,6 +330,13 @@ pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
                     mismatch.transaction,
                     shown(&mismatch.local_amount),
                     shown(&mismatch.facilitator_amount)
+                ));
+            }
+            out.push_str("\nNetwork mismatches:\n");
+            for mismatch in &diff.network_mismatch {
+                out.push_str(&format!(
+                    "  {} local={} facilitator={}\n",
+                    mismatch.transaction, mismatch.local_network, mismatch.facilitator_network
                 ));
             }
             for (label, entries) in [

@@ -55,6 +55,11 @@ for record in records:
     out.append(record)
 out.append({"success": True, "transaction": "0x" + "f" * 64,
             "network": "eip155:2424", "amount": "900000"})
+# Same hash and amount as one of ours, but on a different chain: a hash alone
+# does not identify a settlement, so this must surface as a network mismatch.
+extra = dict(records[0])
+extra["network"] = "eip155:9999"
+out.append(extra)
 print(json.dumps(out, indent=2))
 PY
 "$BIN" reconcile --local /tmp/kxr-ledger.json --facilitator /tmp/kxr-facilitator.json

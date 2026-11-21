@@ -14,13 +14,18 @@
 //!   delivered, and a retry will charge them twice.
 //! - **Amount mismatch** — both sides saw the same transaction but disagree
 //!   on how much it was worth.
+//! - **Network mismatch** — the same hash is recorded against a different
+//!   CAIP-2 chain. The payment landed somewhere other than your ledger says,
+//!   so billing and delivery driven off that record point at the wrong chain.
 //!
 //! # Matching
 //!
 //! Records are matched on the settlement transaction hash, which is the only
 //! identifier both sides are guaranteed to share. It is normalized by trimming
 //! whitespace and lowercasing, because hex hashes reach us from hand-edited
-//! exports and mixed-case logs.
+//! exports and mixed-case logs. The CAIP-2 network must then agree before the
+//! pair can be called a match; network identifiers are trimmed but **not**
+//! case-folded, since CAIP-2 references may be case-sensitive.
 //!
 //! Failed settlements are deliberately excluded from matching. A failed
 //! `SettleResponse` has no on-chain transaction, so pairing one against the
@@ -64,6 +69,18 @@ pub struct AmountMismatch {
     pub facilitator_amount: Option<String>,
 }
 
+/// Two records sharing a transaction hash but disagreeing on the CAIP-2
+/// network the settlement happened on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct NetworkMismatch {
+    /// Transaction hash (taken from the local record, trimmed).
+    pub transaction: String,
+    /// Network identifier the local ledger recorded.
+    pub local_network: String,
+    /// Network identifier the facilitator reported.
+    pub facilitator_network: String,
+}
+
 /// Result of comparing a local ledger against a facilitator ledger.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct LedgerDiff {
@@ -77,6 +94,8 @@ pub struct LedgerDiff {
     pub matched: usize,
     /// Pairs whose amounts disagree.
     pub amount_mismatch: Vec<AmountMismatch>,
+    /// Pairs recorded against different CAIP-2 networks.
+    pub network_mismatch: Vec<NetworkMismatch>,
     /// Settlements only the local ledger has.
     pub only_local: Vec<DiffEntry>,
     /// Settlements only the facilitator ledger has.
@@ -93,7 +112,10 @@ impl LedgerDiff {
     /// one-sided settlement. These are the findings a gate should fail on.
     #[must_use]
     pub fn errors(&self) -> usize {
-        self.amount_mismatch.len() + self.only_local.len() + self.only_facilitator.len()
+        self.amount_mismatch.len()
+            + self.network_mismatch.len()
+            + self.only_local.len()
+            + self.only_facilitator.len()
     }
 
     /// Number of soft findings: claims of settlement that cannot be
@@ -208,7 +230,18 @@ pub fn reconcile(local: &[SettlementRecord], facilitator: &[SettlementRecord]) -
             let local_record = local_records[index];
             let facilitator_record = facilitator_records[index];
             diff.compared += 1;
-            if same_amount(&local_record.amount, &facilitator_record.amount) {
+            // CAIP-2 network is part of a settlement's identity: the same hash
+            // on another chain is not the same payment. Check it before the
+            // amount — if the chains differ there is no single settlement
+            // whose amount could be "correct", so a network finding wins and
+            // the pair is not counted as matched either way.
+            if local_record.network.trim() != facilitator_record.network.trim() {
+                diff.network_mismatch.push(NetworkMismatch {
+                    transaction: local_record.transaction.trim().to_owned(),
+                    local_network: local_record.network.clone(),
+                    facilitator_network: facilitator_record.network.clone(),
+                });
+            } else if same_amount(&local_record.amount, &facilitator_record.amount) {
                 diff.matched += 1;
             } else {
                 diff.amount_mismatch.push(AmountMismatch {
@@ -370,5 +403,66 @@ mod tests {
         assert_eq!(diff.local_records, 0);
         assert_eq!(diff.facilitator_records, 0);
         assert!(diff.is_clean());
+    }
+
+    #[test]
+    fn the_same_hash_on_a_different_network_is_not_a_match() {
+        // A hash alone does not identify a settlement: CAIP-2 network is part
+        // of the identity. Recording a mainnet payment against the testnet (or
+        // vice versa) is exactly the kind of mistake reconciliation exists to
+        // catch, even when the amount agrees on both sides.
+        let local = rec("0xaa", Some("1000"));
+        let mut facilitator = rec("0xaa", Some("1000"));
+        facilitator.network = "eip155:9999".into();
+
+        let diff = reconcile(&[local], &[facilitator]);
+        assert_eq!(diff.compared, 1);
+        assert_eq!(diff.matched, 0, "different chains cannot be a clean match");
+        assert!(diff.amount_mismatch.is_empty());
+        assert_eq!(
+            diff.network_mismatch,
+            vec![NetworkMismatch {
+                transaction: "0xaa".into(),
+                local_network: "eip155:2424".into(),
+                facilitator_network: "eip155:9999".into(),
+            }]
+        );
+        assert_eq!(diff.errors(), 1);
+        assert!(!diff.is_clean(), "a cross-chain mismatch must be a finding");
+    }
+
+    #[test]
+    fn a_network_mismatch_takes_precedence_over_an_amount_mismatch() {
+        // If the chains differ, the two records are not the same settlement,
+        // so there is no single "right" amount to compare. Report one precise
+        // finding instead of two competing ones.
+        let mut local = rec("0xaa", Some("1000"));
+        local.network = "eip155:2424".into();
+        let mut facilitator = rec("0xaa", Some("999"));
+        facilitator.network = "eip155:9999".into();
+
+        let diff = reconcile(&[local], &[facilitator]);
+        assert_eq!(diff.network_mismatch.len(), 1);
+        assert!(diff.amount_mismatch.is_empty());
+        assert_eq!(diff.matched, 0);
+        assert_eq!(diff.errors(), 1);
+    }
+
+    #[test]
+    fn network_whitespace_is_ignored_but_case_is_not() {
+        let mut local = rec("0xaa", Some("1"));
+        local.network = " eip155:2424 ".into();
+        let mut facilitator = rec("0xaa", Some("1"));
+        facilitator.network = "eip155:2424".into();
+        assert_eq!(reconcile(&[local], &[facilitator.clone()]).matched, 1);
+
+        let mut upper = rec("0xaa", Some("1"));
+        upper.network = "EIP155:2424".into();
+        // CAIP-2 references can be case-sensitive, so a case difference is
+        // surfaced for a human to judge rather than silently folded away.
+        assert_eq!(
+            reconcile(&[upper], &[facilitator]).network_mismatch.len(),
+            1
+        );
     }
 }

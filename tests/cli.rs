@@ -563,3 +563,104 @@ fn cli_reconcile_missing_file_is_a_runtime_failure() {
     // 1 (runtime failure), never 3 (gate): an unreadable input is not a finding.
     assert_eq!(output.status.code(), Some(1));
 }
+
+// ---------------------------------------------------------------------------
+// `reconcile`: CAIP-2 network is part of the settlement identity
+// ---------------------------------------------------------------------------
+
+const MAINNET_ENTRY: &str =
+    r#"{"success":true,"transaction":"0xAA","network":"eip155:2424","amount":"1000"}"#;
+const OTHER_CHAIN_ENTRY: &str =
+    r#"{"success":true,"transaction":"0xaa","network":"eip155:9999","amount":"1000"}"#;
+
+#[test]
+fn cli_reconcile_network_mismatch_is_a_finding_in_all_formats() {
+    let local = TempLedger::new("net-local", &format!("[{MAINNET_ENTRY}]"));
+    let facilitator = TempLedger::new("net-facilitator", &format!("[{OTHER_CHAIN_ENTRY}]"));
+
+    // Text: header counts it and the detailed section explains both sides.
+    let text = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+        ],
+        None,
+    );
+    assert_eq!(text.status.code(), Some(0), "no gate configured");
+    let body = stdout_text(&text);
+    assert!(body.contains("network mismatches: 1"), "{body}");
+    assert!(
+        body.contains("0xAA local=eip155:2424 facilitator=eip155:9999"),
+        "{body}"
+    );
+    assert!(body.contains("Matched: 0"), "{body}");
+
+    // JSON: the structured finding is machine-readable.
+    let json = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--format",
+            "json",
+        ],
+        None,
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout_text(&json)).expect("one parseable JSON document");
+    assert_eq!(value["network_mismatch"].as_array().unwrap().len(), 1);
+    assert_eq!(value["network_mismatch"][0]["local_network"], "eip155:2424");
+    assert_eq!(
+        value["network_mismatch"][0]["facilitator_network"],
+        "eip155:9999"
+    );
+    assert_eq!(value["matched"], 0);
+
+    // CSV: one header, the new finding kind as its own section.
+    let csv = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--format",
+            "csv",
+        ],
+        None,
+    );
+    let csv_body = stdout_text(&csv);
+    let rows: Vec<&str> = csv_body.lines().collect();
+    assert_eq!(
+        rows[0],
+        "section,transaction,local_amount,facilitator_amount,network,facilitator_network,payer"
+    );
+    assert!(rows[1].starts_with("network_mismatch,0xAA,,,"), "{rows:?}");
+    assert_eq!(rows.len(), 2);
+}
+
+#[test]
+fn cli_reconcile_network_mismatch_trips_the_error_gate() {
+    let local = TempLedger::new("gate-net-local", &format!("[{MAINNET_ENTRY}]"));
+    let facilitator = TempLedger::new("gate-net-facilitator", &format!("[{OTHER_CHAIN_ENTRY}]"));
+
+    let gated = run(
+        &[
+            "reconcile",
+            "--local",
+            local.path(),
+            "--facilitator",
+            facilitator.path(),
+            "--fail-on",
+            "error",
+        ],
+        None,
+    );
+    assert_eq!(gated.status.code(), Some(3));
+    assert!(stdout_text(&gated).contains("network mismatches: 1"));
+}

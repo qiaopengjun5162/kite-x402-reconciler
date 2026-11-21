@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `reconcile` treated a transaction hash as a complete settlement identity, so
+  a record logged against `eip155:2366` paired cleanly with the facilitator's
+  `eip155:2368` record at the same hash and amount. The payment landed on a
+  different chain than the ledger claims — exactly the kind of error this tool
+  exists to catch. The CAIP-2 network is now checked before the amount; a
+  mismatch produces a new `network_mismatch` finding and counts as an error
+  under `--fail-on error`. Network strings are trimmed but not case-folded,
+  since CAIP-2 references may be case-sensitive.
+- When both the network and the amount differ, `network_mismatch` wins: the two
+  records are not the same settlement, so reporting an "amount mismatch" as
+  well would imply a single payment with two right answers.
+
+### Added
+
+- `NetworkMismatch` in `diff` and a `network_mismatch` column/section in the
+  CSV and text renders. JSON gains the field automatically via `Serialize`.
+  The CSV header gains a trailing `facilitator_network` column; existing
+  columns keep their names and order.
+
+**Test count: 81 (54 unit + 27 integration).**
+
 ## [0.2.0] - 2026-11-20
 
 ### Added
