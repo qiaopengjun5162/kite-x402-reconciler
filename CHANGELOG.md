@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   reconciliation — the duplicate check missed exactly the records that would
   later collide. Both paths now share `model::normalize_hash`, so duplicate
   detection and reconciliation agree on what counts as the same hash.
+- Replay (`duplicate-nonce`) detection keyed the nonce by the raw payer string.
+  EVM addresses are case-insensitive hex, so the same payer written as `0xABCD`
+  and ` 0xabcd ` looked like two payers and a reused nonce escaped detection —
+  the exact double-spend case the check exists to catch. The payer is now
+  normalized via the shared hex-identity rule (`model::normalize_address`),
+  which uses the same canonicalization as hashes, so replay and duplicate
+  detection agree on identity.
 
 ## [0.2.1] - 2026-11-21
 

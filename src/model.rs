@@ -114,22 +114,42 @@ pub struct SettlementRecord {
     pub nonce: Option<String>,
 }
 
-/// Normalize a settlement transaction hash into the identity key every
-/// comparison in this crate must use.
+/// Canonicalize a hex identifier: trim surrounding whitespace and lowercase.
 ///
-/// Hashes reach us from hand-edited exports and mixed-case logs, so they are
-/// trimmed and lowercased: `0xABCD` and ` 0xabcd ` denote the same on-chain
-/// settlement. `None` means "not identifiable" — an empty or whitespace-only
-/// hash. Both reconciliation pairing and duplicate detection rely on this one
-/// function so they can never disagree about what counts as the same hash.
-#[must_use]
-pub fn normalize_hash(raw: &str) -> Option<String> {
+/// This is the single definition of identity normalization in the crate.
+/// Transaction hashes and EVM addresses are both case-insensitive hex that
+/// arrive from hand-edited exports and mixed-case logs, so every comparison
+/// key goes through here and can never disagree about what counts as "the
+/// same" value. `None` means "not identifiable" (empty / whitespace only).
+fn normalize_hex_id(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         None
     } else {
         Some(trimmed.to_ascii_lowercase())
     }
+}
+
+/// Normalize a settlement transaction hash into the identity key every
+/// comparison in this crate must use.
+///
+/// `0xABCD` and ` 0xabcd ` denote the same on-chain settlement. Both
+/// reconciliation pairing and duplicate detection rely on this function so
+/// they can never disagree about what counts as the same hash.
+#[must_use]
+pub fn normalize_hash(raw: &str) -> Option<String> {
+    normalize_hex_id(raw)
+}
+
+/// Normalize a payer wallet address into the identity key used for replay
+/// detection.
+///
+/// EVM addresses are case-insensitive hex, so `0xABCD` and ` 0xabcd ` denote
+/// the same payer. Reusing a nonce under either spelling is one replay, not
+/// two independent payments.
+#[must_use]
+pub fn normalize_address(raw: &str) -> Option<String> {
+    normalize_hex_id(raw)
 }
 
 impl SettlementRecord {
@@ -179,6 +199,18 @@ mod tests {
         assert_eq!(normalize_hash("0xabCD"), Some("0xabcd".to_owned()));
         assert_eq!(normalize_hash(""), None);
         assert_eq!(normalize_hash("   "), None);
+    }
+
+    #[test]
+    fn normalize_address_uses_the_same_rule_as_hash() {
+        // A payer address must canonicalize identically to a hash so replay
+        // detection and duplicate detection agree on hex identity.
+        let address = format!("0x{}", "AB".repeat(20));
+        assert_eq!(
+            normalize_address(&format!("  {address}  ")),
+            normalize_hash(&address)
+        );
+        assert_eq!(normalize_address("  "), None);
     }
 
     #[test]

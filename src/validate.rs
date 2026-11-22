@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::DateTime;
 use serde::Serialize;
 
-use crate::model::{normalize_hash, SettlementRecord};
+use crate::model::{normalize_address, normalize_hash, SettlementRecord};
 
 /// How serious a validation issue is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -226,12 +226,18 @@ fn append_duplicate_issues(records: &[SettlementRecord], report: &mut Validation
     }
 
     // Replayed nonces within the same payer (error: double-spend risk).
+    // Normalize the payer address exactly like transaction hashes: EVM
+    // addresses are case-insensitive hex, so `0xABCD` and ` 0xabcd ` are one
+    // payer and a repeated nonce under either spelling is a single replay.
     let mut seen_nonces: HashSet<(String, String)> = HashSet::new();
     for (index, record) in records.iter().enumerate() {
         let (Some(payer), Some(nonce)) = (&record.payer, &record.nonce) else {
             continue;
         };
-        if !seen_nonces.insert((payer.clone(), nonce.clone())) {
+        let Some(payer_key) = normalize_address(payer) else {
+            continue;
+        };
+        if !seen_nonces.insert((payer_key, nonce.clone())) {
             report.push(Issue {
                 index,
                 code: "duplicate-nonce",
@@ -344,6 +350,28 @@ mod tests {
         b.nonce = Some("n1".into());
         let report = validate_all(&[a, b]);
         assert!(report.issues.iter().any(|i| i.code == "duplicate-nonce"));
+    }
+
+    #[test]
+    fn duplicate_nonce_detection_normalizes_payer_case_and_padding() {
+        // An EVM address is case-insensitive hex: `0xAB..` and ` 0xab.. `
+        // denote the same payer, and `looks_like_address` accepts both.
+        // Replay detection must normalize the payer exactly like the
+        // transaction hash, or a reused nonce slips through when the address
+        // is written in a different case or with surrounding whitespace.
+        let canonical = format!("0x{}", "c".repeat(40));
+        let padded_upper = format!("  {}  ", canonical.to_ascii_uppercase());
+        let mut a = record("eip155:1", "0x1", None);
+        a.payer = Some(canonical);
+        a.nonce = Some("n1".into());
+        let mut b = record("eip155:1", "0x2", None);
+        b.payer = Some(padded_upper);
+        b.nonce = Some("n1".into());
+        let report = validate_all(&[a, b]);
+        assert!(
+            report.issues.iter().any(|i| i.code == "duplicate-nonce"),
+            "the same payer in different case/padding must still be a reused nonce"
+        );
     }
 
     #[test]
