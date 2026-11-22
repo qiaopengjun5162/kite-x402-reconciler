@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::DateTime;
 use serde::Serialize;
 
-use crate::model::SettlementRecord;
+use crate::model::{normalize_hash, SettlementRecord};
 
 /// How serious a validation issue is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -203,12 +203,16 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
 
 fn append_duplicate_issues(records: &[SettlementRecord], report: &mut ValidationReport) {
     // Duplicate transaction hashes (error: a tx should settle once).
-    let mut first_tx: HashMap<&str, usize> = HashMap::new();
+    // Use the same normalized identity as reconciliation (model::normalize_hash)
+    // so that a hash written in a different case or with padding is still
+    // recognized as the same settlement — otherwise this check misses exactly
+    // the records that reconcile later pairs together.
+    let mut first_tx: HashMap<String, usize> = HashMap::new();
     for (index, record) in records.iter().enumerate() {
-        if record.transaction.trim().is_empty() {
+        let Some(key) = normalize_hash(&record.transaction) else {
             continue;
-        }
-        if let Some(first) = first_tx.insert(record.transaction.as_str(), index) {
+        };
+        if let Some(first) = first_tx.insert(key, index) {
             report.push(Issue {
                 index,
                 code: "duplicate-transaction",
@@ -306,6 +310,27 @@ mod tests {
             .iter()
             .any(|i| i.code == "duplicate-transaction"));
         assert_eq!(report.errors, 1);
+    }
+
+    #[test]
+    fn duplicate_detection_normalizes_hash_case_and_padding() {
+        // `reconcile` normalizes hashes with trim + lowercase before pairing
+        // (see diff::match_key), because hex hashes arrive from hand-edited
+        // exports and mixed-case logs. Duplicate detection must apply the exact
+        // same normalization or it misses the very records reconcile pairs.
+        let canonical = format!("0x{}", "b".repeat(64));
+        let padded_upper = format!("  {}  ", canonical.to_ascii_uppercase());
+        let report = validate_all(&[
+            record("eip155:1", &canonical, None),
+            record("eip155:1", &padded_upper, None),
+        ]);
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.code == "duplicate-transaction"),
+            "the same hash in different case/padding must still be a duplicate"
+        );
     }
 
     #[test]

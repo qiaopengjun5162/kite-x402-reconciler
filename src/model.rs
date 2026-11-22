@@ -114,6 +114,24 @@ pub struct SettlementRecord {
     pub nonce: Option<String>,
 }
 
+/// Normalize a settlement transaction hash into the identity key every
+/// comparison in this crate must use.
+///
+/// Hashes reach us from hand-edited exports and mixed-case logs, so they are
+/// trimmed and lowercased: `0xABCD` and ` 0xabcd ` denote the same on-chain
+/// settlement. `None` means "not identifiable" — an empty or whitespace-only
+/// hash. Both reconciliation pairing and duplicate detection rely on this one
+/// function so they can never disagree about what counts as the same hash.
+#[must_use]
+pub fn normalize_hash(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_ascii_lowercase())
+    }
+}
+
 impl SettlementRecord {
     /// View the `network` field as a [`NetworkId`].
     pub fn network_id(&self) -> NetworkId {
@@ -153,6 +171,14 @@ mod tests {
         ] {
             assert!(!NetworkId::new(bad).is_valid(), "expected invalid: {bad}");
         }
+    }
+
+    #[test]
+    fn normalize_hash_trims_lowercases_and_rejects_blank() {
+        assert_eq!(normalize_hash("  0xABCD  "), Some("0xabcd".to_owned()));
+        assert_eq!(normalize_hash("0xabCD"), Some("0xabcd".to_owned()));
+        assert_eq!(normalize_hash(""), None);
+        assert_eq!(normalize_hash("   "), None);
     }
 
     #[test]

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `validate` and `duplicates` detected repeated transaction hashes using the
+  raw string, while `reconcile` normalizes hashes with trim + lowercase before
+  pairing. The same hash written once as `0xABCD` and once as ` 0xabcd ` was
+  reported as distinct records by validation yet paired as one settlement by
+  reconciliation — the duplicate check missed exactly the records that would
+  later collide. Both paths now share `model::normalize_hash`, so duplicate
+  detection and reconciliation agree on what counts as the same hash.
+
 ## [0.2.1] - 2026-11-21
 
 ### Fixed

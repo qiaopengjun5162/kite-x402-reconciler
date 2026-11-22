@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::model::SettlementRecord;
+use crate::model::{normalize_hash, SettlementRecord};
 
 /// A settlement that exists on only one side of the comparison.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -138,12 +138,7 @@ impl LedgerDiff {
 /// what separates a failed settlement (expected, counted) from a successful
 /// one with no hash (a defect, warned about).
 fn match_key(record: &SettlementRecord) -> Option<String> {
-    let trimmed = record.transaction.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_ascii_lowercase())
-    }
+    normalize_hash(&record.transaction)
 }
 
 /// Successful records bucketed by transaction key, plus the skip counters.
