@@ -154,8 +154,14 @@ pub fn normalize_address(raw: &str) -> Option<String> {
 
 impl SettlementRecord {
     /// View the `network` field as a [`NetworkId`].
+    ///
+    /// Surrounding whitespace is trimmed: a hand-edited export may pad the
+    /// field, and reconciliation compares networks after trimming too (see
+    /// `diff::reconcile`). Validation and reconciliation must agree on what
+    /// counts as the same network, so the view applies the same trim. Whitespace
+    /// *inside* the identifier is preserved and still fails CAIP-2 validation.
     pub fn network_id(&self) -> NetworkId {
-        NetworkId::new(self.network.clone())
+        NetworkId::new(self.network.trim().to_owned())
     }
 
     /// Parse `amount` into an unsigned 128-bit atomic amount.

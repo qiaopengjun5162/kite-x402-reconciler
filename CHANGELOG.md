@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   network**, falling back to another network only when that is exhausted; a
   genuine cross-chain difference is still reported as `network_mismatch`.
   Unpaired facilitator records keep their input order.
+- `validate` checked the CAIP-2 network with the raw field while `reconcile`
+  trims networks before comparing. A record whose network was padded (e.g.
+  `" eip155:2424 "`) was flagged as `invalid-network` by validation yet paired
+  as a same-chain match by reconciliation — the two commands disagreed about
+  the same data. `network_id()` now trims surrounding whitespace, matching the
+  reconciliation view; whitespace inside the identifier is still rejected.
 
 ## [0.2.1] - 2026-11-21
 

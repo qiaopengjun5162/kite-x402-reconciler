@@ -308,6 +308,30 @@ mod tests {
     }
 
     #[test]
+    fn network_validation_trims_padding_like_reconciliation() {
+        // `reconcile` trims a CAIP-2 network before comparing two sides (see
+        // diff.rs): a hand-edited export with a padded network still pairs as
+        // the same chain. Validation must not flag the very records the
+        // reconciler accepts, or `validate` and `reconcile` disagree about
+        // the same data. Only surrounding padding is tolerated; an embedded
+        // space is still rejected by `NetworkId::is_valid`.
+        let padded = "  eip155:2424  ";
+        let report = validate_all(&[record(padded, &format!("0x{}", "a".repeat(64)), None)]);
+        assert!(
+            !report.issues.iter().any(|i| i.code == "invalid-network"),
+            "a padded network must validate, as reconcile trims it before comparing"
+        );
+        // Trimming must not widen the shape check: whitespace inside the
+        // identifier is still malformed CAIP-2 and stays an error.
+        let embedded = "eip 155:1";
+        let report = validate_all(&[record(embedded, &format!("0x{}", "b".repeat(64)), None)]);
+        assert!(
+            report.issues.iter().any(|i| i.code == "invalid-network"),
+            "an embedded space must still be rejected"
+        );
+    }
+
+    #[test]
     fn detects_duplicate_transaction() {
         let tx = format!("0x{}", "b".repeat(64));
         let report = validate_all(&[record("eip155:1", &tx, None), record("eip155:1", &tx, None)]);
