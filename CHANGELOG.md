@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   normalized via the shared hex-identity rule (`model::normalize_address`),
   which uses the same canonicalization as hashes, so replay and duplicate
   detection agree on identity.
+- `reconcile` paired records within a transaction hash by their row position.
+  Since the CAIP-2 network is part of a settlement's identity, a hash seen on
+  two chains with both sides agreeing could still be reported as two
+  cross-chain mismatches if the two exports listed the rows in a different
+  order — the verdict depended on export order, not on the data. Records in a
+  hash group are now paired to the first unpaired record on the **same
+  network**, falling back to another network only when that is exhausted; a
+  genuine cross-chain difference is still reported as `network_mismatch`.
+  Unpaired facilitator records keep their input order.
 
 ## [0.2.1] - 2026-11-21
 

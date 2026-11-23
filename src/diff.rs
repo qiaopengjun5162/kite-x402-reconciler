@@ -220,10 +220,39 @@ pub fn reconcile(local: &[SettlementRecord], facilitator: &[SettlementRecord]) -
         // the facilitator-only pass below needs no second set lookup.
         let facilitator_records = facilitator_by_tx.remove(&key).unwrap_or_default();
 
+        // Network is part of a settlement's identity, so pair same-network
+        // records first instead of trusting row order. A transaction hash can
+        // appear on several chains; pairing by position would report two clean
+        // settlements as cross-chain mismatches purely because the two exports
+        // listed their rows in different orders. For each local record take the
+        // *first* unpaired facilitator record on the same network, falling back
+        // to any unpaired record only when that network is exhausted. Slots are
+        // consumed by index so unpaired facilitator records still come out in
+        // input order, preserving the documented output ordering.
         let pairs = local_records.len().min(facilitator_records.len());
-        for index in 0..pairs {
-            let local_record = local_records[index];
-            let facilitator_record = facilitator_records[index];
+        let mut taken = vec![false; facilitator_records.len()];
+        let mut choices: Vec<usize> = Vec::with_capacity(pairs);
+        for local_record in &local_records[..pairs] {
+            let network = local_record.network.trim();
+            let same_network = facilitator_records
+                .iter()
+                .enumerate()
+                .find(|(i, rec)| !taken[*i] && rec.network.trim() == network);
+            let pick = same_network.or_else(|| {
+                facilitator_records
+                    .iter()
+                    .enumerate()
+                    .find(|(i, _)| !taken[*i])
+            });
+            let Some((index, _)) = pick else {
+                unreachable!("pairs <= facilitator records, so an unpaired one exists")
+            };
+            taken[index] = true;
+            choices.push(index);
+        }
+
+        for (local_record, fac_index) in local_records[..pairs].iter().zip(choices) {
+            let facilitator_record = facilitator_records[fac_index];
             diff.compared += 1;
             // CAIP-2 network is part of a settlement's identity: the same hash
             // on another chain is not the same payment. Check it before the
@@ -249,12 +278,15 @@ pub fn reconcile(local: &[SettlementRecord], facilitator: &[SettlementRecord]) -
 
         // Beyond the shorter side, records are unpaired. This is how a
         // duplicated transaction shows up: it pairs once, and the extra copy
-        // becomes a one-sided finding instead of vanishing.
+        // becomes a one-sided finding instead of vanishing. Unpaired
+        // facilitator records are emitted in their original input order.
         for record in &local_records[pairs..] {
             diff.only_local.push(entry(record));
         }
-        for record in facilitator_records.into_iter().skip(pairs) {
-            diff.only_facilitator.push(entry(record));
+        for (index, record) in facilitator_records.iter().enumerate() {
+            if !taken[index] {
+                diff.only_facilitator.push(entry(record));
+            }
         }
     }
 
@@ -424,6 +456,49 @@ mod tests {
         );
         assert_eq!(diff.errors(), 1);
         assert!(!diff.is_clean(), "a cross-chain mismatch must be a finding");
+    }
+
+    #[test]
+    fn pairing_prefers_matching_networks_regardless_of_row_order() {
+        // Network is part of a settlement's identity (v0.2.1). When one hash
+        // has several records on different chains, each side must pair with
+        // the record on the SAME chain — not just whichever row came first.
+        // Otherwise the same two ledgers yield different verdicts depending
+        // only on export order.
+        let local_a = rec("0xaa", Some("1000")); // eip155:2424
+        let mut local_b = rec("0xaa", Some("2000"));
+        local_b.network = "eip155:9999".into();
+        let mut fac_b = rec("0xaa", Some("2000"));
+        fac_b.network = "eip155:9999".into();
+        let fac_a = rec("0xaa", Some("1000")); // eip155:2424
+
+        let in_order = reconcile(
+            &[local_a.clone(), local_b.clone()],
+            &[fac_a.clone(), fac_b.clone()],
+        );
+        let shuffled = reconcile(
+            &[local_a.clone(), local_b.clone()],
+            &[fac_b.clone(), fac_a.clone()],
+        );
+
+        assert_eq!(
+            in_order.matched, 2,
+            "both chains match in the aligned order"
+        );
+        assert_eq!(in_order.errors(), 0);
+        assert_eq!(
+            shuffled.matched, 2,
+            "same two settlements must still match when facilitator rows are shuffled"
+        );
+        assert!(
+            shuffled.network_mismatch.is_empty(),
+            "pairing by row order mislabels two clean matches as cross-chain"
+        );
+        assert_eq!(shuffled.errors(), 0);
+        assert_eq!(
+            in_order.matched, shuffled.matched,
+            "verdict must not depend on row order"
+        );
     }
 
     #[test]
