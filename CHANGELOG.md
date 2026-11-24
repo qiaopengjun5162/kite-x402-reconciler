@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   entirely. Every element failed with `missing field success`, while the same
   envelope as a single object worked. Array elements now go through the same
   `decode_record_value` path as single objects and JSONL lines.
+- Input files beginning with a UTF-8 BOM (U+FEFF) failed to parse in every
+  format. `str::trim()` does not strip the BOM (it is not Unicode White_Space)
+  and serde_json rejects it at column 1. The BOM is now stripped before
+  parsing, so Windows/Excel/PowerShell exports ingest like any other file.
 
 ## [0.2.1] - 2026-11-21
 

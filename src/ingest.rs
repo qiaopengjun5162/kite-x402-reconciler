@@ -33,6 +33,10 @@ pub fn read_records(path: Option<&Path>) -> Result<Vec<SettlementRecord>> {
 /// Parse settlement records from raw text. See [`read_records`] for the
 /// accepted encodings.
 pub fn parse_records(text: &str) -> Result<Vec<SettlementRecord>> {
+    // U+FEFF (BOM) is not Unicode White_Space, so trim() leaves it in place
+    // and serde_json then rejects the first line at column 1. Strip it before
+    // anything else so Windows/Excel exports ingest like any other file.
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
@@ -140,6 +144,19 @@ mod tests {
         let text = format!("{}\n\n{}\n", sample_object(), sample_object());
         let records = parse_records(&text).unwrap();
         assert_eq!(records.len(), 2);
+    }
+
+    #[test]
+    fn strips_utf8_bom_before_parsing() {
+        // Windows/Excel exports and PowerShell `Out-File` prepend U+FEFF.
+        // str::trim() does not remove it (U+FEFF is not White_Space), and
+        // serde_json rejects it, so every such file fails at column 1.
+        let with_bom = format!("\u{FEFF}{}", sample_object());
+        let records = parse_records(&with_bom).unwrap();
+        assert_eq!(records.len(), 1);
+
+        let array_with_bom = format!("\u{FEFF}[{}]", sample_object());
+        assert_eq!(parse_records(&array_with_bom).unwrap().len(), 1);
     }
 
     #[test]
