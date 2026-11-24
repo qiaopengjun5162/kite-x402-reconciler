@@ -142,7 +142,7 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
                 severity: Severity::Error,
                 message: "transaction hash is empty".into(),
             });
-        } else if !looks_like_tx_hash(&record.transaction) {
+        } else if !looks_like_tx_hash(record.transaction.trim()) {
             report.push(Issue {
                 index,
                 code: "invalid-transaction",
@@ -172,9 +172,10 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
             }),
         }
 
-        // Payer address, when present.
+        // Payer address, when present. Trim for the format check, matching
+        // normalize_address used by replay detection and the hash check above.
         if let Some(payer) = &record.payer {
-            if !looks_like_address(payer) {
+            if !looks_like_address(payer.trim()) {
                 report.push(Issue {
                     index,
                     code: "invalid-payer",
@@ -328,6 +329,33 @@ mod tests {
         assert!(
             report.issues.iter().any(|i| i.code == "invalid-network"),
             "an embedded space must still be rejected"
+        );
+    }
+
+    #[test]
+    fn format_checks_trim_padding_like_the_rest_of_the_pipeline() {
+        // reconcile and duplicate detection both trim before comparing hashes
+        // and addresses (model::normalize_hash / normalize_address). A clean
+        // record padded with whitespace must not be reported as malformed —
+        // otherwise validate --fail-on warning rejects a ledger that
+        // reconcile considers perfectly clean.
+        let mut r = record(
+            "eip155:2424",
+            &format!("  0x{}  ", "a".repeat(64)),
+            Some("100"),
+        );
+        r.payer = Some(format!("  0x{}  ", "b".repeat(40)));
+        let report = validate_all(&[r]);
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|i| i.code == "invalid-transaction"),
+            "a padded but valid tx hash must not be flagged"
+        );
+        assert!(
+            !report.issues.iter().any(|i| i.code == "invalid-payer"),
+            "a padded but valid payer must not be flagged"
         );
     }
 

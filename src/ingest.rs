@@ -43,10 +43,11 @@ pub fn parse_records(text: &str) -> Result<Vec<SettlementRecord>> {
         return match value {
             Value::Array(items) => items
                 .into_iter()
-                .map(|item| {
-                    serde_json::from_value::<SettlementRecord>(item)
-                        .map_err(|e| ReconcileError::Decode(format!("invalid record: {e}")))
-                })
+                // Each element goes through the same envelope decoding as the
+                // single-object path, so a bulk array of `paymentResponse`
+                // wrappers (documented in USAGE.md) works too — not just an
+                // array of bare records.
+                .map(|item| decode_record_value(&ValueObject(item)))
                 .collect(),
             Value::Object(_) => Ok(vec![decode_record_value(&ValueObject(value))?]),
             _ => Err(ReconcileError::Decode(
@@ -168,6 +169,21 @@ mod tests {
         let text = format!(r#"{{"paymentResponse":"{encoded}"}}"#);
         let records = parse_records(&text).unwrap();
         assert_eq!(records.len(), 1);
+    }
+
+    #[test]
+    fn decodes_payment_response_envelopes_in_a_json_array() {
+        // USAGE.md documents bulk header ingestion as an array of envelopes.
+        // Each element must go through the same envelope decoding as a single
+        // object, otherwise every element fails with "missing field".
+        let inner = sample_object();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(inner);
+        let text =
+            format!(r#"[{{"paymentResponse":"{encoded}"}},{{"paymentResponse":"{encoded}"}}]"#);
+        let records = parse_records(&text).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].network, "eip155:2424");
+        assert_eq!(records[1].network, "eip155:2424");
     }
 
     #[test]

@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   as a same-chain match by reconciliation — the two commands disagreed about
   the same data. `network_id()` now trims surrounding whitespace, matching the
   reconciliation view; whitespace inside the identifier is still rejected.
+- The format checks for transaction hashes and payer addresses used the raw
+  field, so a valid identifier padded with whitespace (e.g. `"  0xaaaa…  "`)
+  was flagged `invalid-transaction` / `invalid-payer` by `validate` while
+  `reconcile` and duplicate detection — which trim before comparing — treated
+  the same record as clean. `validate --fail-on warning` could therefore reject
+  a ledger reconciliation considered valid. Both checks now trim before
+  validating, consistent with the rest of the identity pipeline.
+- A JSON **array** of `paymentResponse` / `header` envelopes — the bulk header
+  import documented in `docs/USAGE.md` — was decoded by deserializing each
+  element straight into `SettlementRecord`, skipping envelope decoding
+  entirely. Every element failed with `missing field success`, while the same
+  envelope as a single object worked. Array elements now go through the same
+  `decode_record_value` path as single objects and JSONL lines.
 
 ## [0.2.1] - 2026-11-21
 
