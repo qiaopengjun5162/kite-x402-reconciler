@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::model::SettlementRecord;
+use crate::model::{normalize_address, SettlementRecord};
 
 /// Totals for one grouping key.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -68,10 +68,19 @@ pub fn summarize(records: &[SettlementRecord]) -> Summary {
     for record in records {
         summary.total.add(record);
 
-        let network = record.network.clone();
+        // Group by canonical identity, not the raw export spelling. Replay
+        // detection, duplicate detection and reconciliation all key payer and
+        // network through these same rules; grouping on raw values would split
+        // one payer (`0xABCD` / ` 0xabcd `) or one padded CAIP-2 network into
+        // separate rows and fragment the totals a machine consumer reads.
+        let network = record.network_id().as_str().to_owned();
         summary.by_network.entry(network).or_default().add(record);
 
-        let payer = record.payer.clone().unwrap_or_else(|| "(unknown)".into());
+        let payer = record
+            .payer
+            .as_deref()
+            .and_then(normalize_address)
+            .unwrap_or_else(|| "(unknown)".into());
         summary.by_payer.entry(payer).or_default().add(record);
 
         // Normalize to UTC before taking the calendar date. Using the
@@ -166,6 +175,43 @@ mod tests {
         assert_eq!(summary.by_payer["(unknown)"].count, 1);
         assert_eq!(summary.by_day["2026-11-17"].count, 2);
         assert_eq!(summary.by_day["(unknown)"].count, 1);
+    }
+
+    #[test]
+    fn summary_groups_payer_and_network_by_canonical_identity() {
+        // Replay detection and reconciliation both treat these as one payer
+        // and one network: payer is case-insensitive hex, network is trimmed.
+        // The summary must not split them into duplicate groups, or a machine
+        // consumer of by_payer/by_network sees the totals fragmented.
+        let records = vec![
+            rec(
+                "eip155:2424",
+                Some("0xABCD"),
+                Some("2026-11-17"),
+                true,
+                Some("100"),
+            ),
+            rec(
+                " eip155:2424 ",
+                Some(" 0xabcd "),
+                Some("2026-11-17"),
+                true,
+                Some("200"),
+            ),
+        ];
+        let summary = summarize(&records);
+        assert_eq!(
+            summary.by_network.len(),
+            1,
+            "the same CAIP-2 network (with padding) must be one group"
+        );
+        assert_eq!(summary.by_network["eip155:2424"].amount_atomic, 300);
+        assert_eq!(
+            summary.by_payer.len(),
+            1,
+            "the same payer (case/padding variants) must be one group"
+        );
+        assert_eq!(summary.by_payer["0xabcd"].amount_atomic, 300);
     }
 
     #[test]

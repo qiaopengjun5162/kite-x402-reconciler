@@ -55,6 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   format. `str::trim()` does not strip the BOM (it is not Unicode White_Space)
   and serde_json rejects it at column 1. The BOM is now stripped before
   parsing, so Windows/Excel/PowerShell exports ingest like any other file.
+- The `summary` breakdowns keyed `by_network` and `by_payer` on the raw export
+  spelling, while replay detection, duplicate detection and reconciliation all
+  key the same identities through `network_id()` (trim) and `normalize_address`
+  (trim + lowercase). A single payer written `0xABCD` in one row and ` 0xabcd `
+  in another — or a CAIP-2 network with stray padding — was reported as two
+  groups with fragmented totals. Consumers of the JSON/CSV `by_payer` and
+  `by_network` sections could therefore undercount a single payer or chain.
+  Both breakdowns now group on the same canonical identities as the rest of the
+  pipeline.
 - Both CSV renders (`summary` and the full `report`) omitted `amount_overflows`,
   which text prints as a WARNING and JSON serializes. A machine CSV consumer
   therefore saw a plausible-but-incomplete `amount_atomic` with no signal that
