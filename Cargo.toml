@@ -20,3 +20,10 @@ base64 = "0.23"
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[profile.release]
+# CLI distributed to participants: thin LTO trims the binary without the
+# multi-minute fat-LTO build cost. Symbols/debug are left at defaults so a
+# crash still yields a usable backtrace.
+lto = "thin"
+codegen-units = 1

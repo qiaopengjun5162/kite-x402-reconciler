@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Release builds now use thin LTO with a single codegen unit. The distributed
+  CLI binary shrank ~16% (1,399,072 → 1,177,632 bytes on macOS) and the release
+  build got faster, while default debug symbols are kept so crashes still
+  produce a usable backtrace. No runtime behavior or CLI surface changed.
+
 ### Fixed
 
 - `validate` and `duplicates` detected repeated transaction hashes using the
