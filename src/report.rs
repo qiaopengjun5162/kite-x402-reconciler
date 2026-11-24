@@ -98,8 +98,9 @@ pub fn render_summary(summary: &Summary, format: Format) -> String {
     match format {
         Format::Json => to_json_pretty(summary),
         Format::Csv => {
-            let mut out =
-                String::from("group,key,count,succeeded,failed,amount_atomic,amount_unavailable\n");
+            let mut out = String::from(
+                "group,key,count,succeeded,failed,amount_atomic,amount_unavailable,amount_overflows\n",
+            );
             for (label, groups) in [
                 ("network", &summary.by_network),
                 ("payer", &summary.by_payer),
@@ -107,14 +108,15 @@ pub fn render_summary(summary: &Summary, format: Format) -> String {
             ] {
                 for (key, totals) in groups {
                     out.push_str(&format!(
-                        "{},{},{},{},{},{},{}\n",
+                        "{},{},{},{},{},{},{},{}\n",
                         label,
                         csv_field(key),
                         totals.count,
                         totals.succeeded,
                         totals.failed,
                         totals.amount_atomic,
-                        totals.amount_unavailable
+                        totals.amount_unavailable,
+                        totals.amount_overflows
                     ));
                 }
             }
@@ -198,7 +200,7 @@ fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> S
     }
 
     let mut out = String::from(
-        "section,group,key,count,succeeded,failed,amount_atomic,amount_unavailable,issue_index,issue_code,issue_severity,issue_message\n",
+        "section,group,key,count,succeeded,failed,amount_atomic,amount_unavailable,amount_overflows,issue_index,issue_code,issue_severity,issue_message\n",
     );
 
     let mut summary_row = |label: &str, key: &str, totals: &Totals| {
@@ -211,6 +213,7 @@ fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> S
             totals.failed.to_string(),
             totals.amount_atomic.to_string(),
             totals.amount_unavailable.to_string(),
+            totals.amount_overflows.to_string(),
             String::new(),
             String::new(),
             String::new(),
@@ -232,6 +235,7 @@ fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> S
     for issue in &validation.issues {
         out.push_str(&csv_row(&[
             "issue".into(),
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -418,6 +422,48 @@ mod tests {
         assert_eq!(csv_field("a,b"), "\"a,b\"");
         assert_eq!(csv_field("a\"b"), "\"a\"\"b\"");
         assert_eq!(csv_field("a\nb"), "\"a\nb\"");
+    }
+
+    #[test]
+    fn csv_renders_amount_overflows_like_text_and_json() {
+        // text prints a WARNING and JSON serializes amount_overflows, so a
+        // machine CSV consumer must see it too — otherwise a dropped,
+        // unrepresentable amount leaves a plausible-but-wrong total with no
+        // indication that it is incomplete.
+        let totals = Totals {
+            count: 2,
+            succeeded: 2,
+            amount_atomic: u128::MAX,
+            amount_overflows: 1,
+            ..Totals::default()
+        };
+        let summary = Summary {
+            record_count: 2,
+            total: totals.clone(),
+            by_network: std::collections::BTreeMap::from([("eip155:1".into(), totals)]),
+            ..Summary::default()
+        };
+
+        let summary_csv = render_summary(&summary, Format::Csv);
+        assert!(
+            summary_csv
+                .lines()
+                .next()
+                .unwrap()
+                .contains("amount_overflows"),
+            "summary CSV header must expose amount_overflows"
+        );
+        assert!(summary_csv.contains(",1\n") || summary_csv.contains(",1\r\n"));
+
+        let full_csv = render_full_report_csv(&summary, &ValidationReport::default());
+        assert!(
+            full_csv
+                .lines()
+                .next()
+                .unwrap()
+                .contains("amount_overflows"),
+            "full report CSV header must expose amount_overflows"
+        );
     }
 
     #[test]

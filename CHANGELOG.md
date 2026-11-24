@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   format. `str::trim()` does not strip the BOM (it is not Unicode White_Space)
   and serde_json rejects it at column 1. The BOM is now stripped before
   parsing, so Windows/Excel/PowerShell exports ingest like any other file.
+- Both CSV renders (`summary` and the full `report`) omitted `amount_overflows`,
+  which text prints as a WARNING and JSON serializes. A machine CSV consumer
+  therefore saw a plausible-but-incomplete `amount_atomic` with no signal that
+  unrepresentable amounts were dropped — contradicting the "totals never
+  silently lie" guarantee. Both headers now carry a trailing `amount_overflows`
+  column; existing columns keep their names and order.
 
 ## [0.2.1] - 2026-11-21
 
