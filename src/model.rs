@@ -170,7 +170,11 @@ impl SettlementRecord {
     /// `Err(_)` when the amount is present but not a valid non-negative integer.
     /// A single `Result` keeps callers from peeling two layers of `Option`/`Result`.
     pub fn amount_atomic(&self) -> Result<Option<u128>, std::num::ParseIntError> {
-        self.amount.as_deref().map(str::parse::<u128>).transpose()
+        self.amount
+            .as_deref()
+            .map(str::trim)
+            .map(str::parse::<u128>)
+            .transpose()
     }
 }
 
@@ -282,5 +286,33 @@ mod tests {
             ..base
         };
         assert!(with_bad.amount_atomic().is_err());
+    }
+
+    #[test]
+    fn amount_atomic_trims_padding_like_every_other_field() {
+        let padded = SettlementRecord {
+            amount: Some("  1000  ".into()),
+            ..base_record()
+        };
+        assert_eq!(
+            padded.amount_atomic(),
+            Ok(Some(1000)),
+            "a padded amount must parse, like padded hash/payer/network"
+        );
+    }
+
+    fn base_record() -> SettlementRecord {
+        SettlementRecord {
+            success: true,
+            error_reason: None,
+            error_message: None,
+            payer: None,
+            transaction: "0x1".into(),
+            network: "eip155:1".into(),
+            amount: None,
+            resource: None,
+            timestamp: None,
+            nonce: None,
+        }
     }
 }

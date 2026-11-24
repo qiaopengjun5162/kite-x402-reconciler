@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Three parsing/validity checks still used raw field values while the rest of
+  the pipeline trims before comparing: an `errorReason`/`errorMessage` of `""`
+  or whitespace passed `failure-without-reason` (and conversely tripped
+  `success-with-reason`), a padded amount (`" 1000 "`) was rejected as
+  `invalid-amount`, dropped from `summary` totals, and reported as an
+  `amount_mismatch` against its unpadded twin, and a padded RFC 3339 timestamp
+  was flagged `invalid-timestamp` and fell into the `(unknown)` day bucket.
+  All now trim before parsing/judging, consistent with the hash, payer and
+  network fields, so a hand-edited export no longer contradicts itself across
+  `validate`, `reconcile` and `summary`.
+
 ## [0.2.2] - 2026-11-25
 
 ### Changed

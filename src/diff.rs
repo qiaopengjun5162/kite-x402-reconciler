@@ -185,14 +185,19 @@ fn entry(record: &SettlementRecord) -> DiffEntry {
 /// the right test, but it is only available when both sides parse; when either
 /// is missing or malformed we fall back to exact string equality so that
 /// "absent" stays equal to "absent" and a malformed value never silently
-/// matches a valid one.
+/// matches a valid one. Both sides are trimmed first, matching the rest of the
+/// identity pipeline: a hand-edited export with a padded amount is the same
+/// value, not a mismatch.
 fn same_amount(local: &Option<String>, facilitator: &Option<String>) -> bool {
     match (
-        local.as_deref().map(str::parse::<u128>),
-        facilitator.as_deref().map(str::parse::<u128>),
+        local.as_deref().map(str::trim).map(str::parse::<u128>),
+        facilitator
+            .as_deref()
+            .map(str::trim)
+            .map(str::parse::<u128>),
     ) {
         (Some(Ok(left)), Some(Ok(right))) => left == right,
-        _ => local == facilitator,
+        _ => local.as_deref().map(str::trim) == facilitator.as_deref().map(str::trim),
     }
 }
 
@@ -534,5 +539,14 @@ mod tests {
             reconcile(&[upper], &[facilitator]).network_mismatch.len(),
             1
         );
+    }
+
+    #[test]
+    fn same_amount_ignores_padding_on_either_side() {
+        assert!(
+            same_amount(&Some(" 1000 ".into()), &Some("1000".into())),
+            "a padded amount is the same atomic value as its trimmed form"
+        );
+        assert!(same_amount(&Some("01000".into()), &Some("  1000  ".into())));
     }
 }

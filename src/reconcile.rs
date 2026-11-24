@@ -90,7 +90,7 @@ pub fn summarize(records: &[SettlementRecord]) -> Summary {
         let day = record
             .timestamp
             .as_deref()
-            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+            .and_then(|ts| DateTime::parse_from_rfc3339(ts.trim()).ok())
             .map(|dt| dt.with_timezone(&Utc).format("%Y-%m-%d").to_string())
             .unwrap_or_else(|| "(unknown)".into());
         summary.by_day.entry(day).or_default().add(record);
@@ -271,5 +271,16 @@ mod tests {
         let summary = summarize(&records);
         assert_eq!(summary.total.amount_atomic, u128::MAX);
         assert_eq!(summary.total.amount_overflows, 1);
+    }
+
+    #[test]
+    fn padded_timestamp_groups_into_its_utc_day() {
+        let mut r = rec("eip155:1", None, None, true, Some("1"));
+        r.timestamp = Some(" 2026-11-17T10:00:00Z ".into());
+        let summary = summarize(&[r]);
+        assert!(
+            summary.by_day.contains_key("2026-11-17"),
+            "a padded RFC 3339 timestamp must still land in its UTC day bucket"
+        );
     }
 }

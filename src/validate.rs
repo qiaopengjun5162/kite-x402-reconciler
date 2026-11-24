@@ -104,8 +104,18 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
     };
 
     for (index, record) in records.iter().enumerate() {
-        // success=false must explain why.
-        if !record.success && record.error_reason.is_none() && record.error_message.is_none() {
+        // success=false must explain why. A whitespace-only reason carries no
+        // information, so it must not pass the check — trim before deciding,
+        // consistent with every other identity/free-text field in the pipeline.
+        let has_error_info = |value: &Option<String>| {
+            value
+                .as_deref()
+                .is_some_and(|reason| !reason.trim().is_empty())
+        };
+        if !record.success
+            && !has_error_info(&record.error_reason)
+            && !has_error_info(&record.error_message)
+        {
             report.push(Issue {
                 index,
                 code: "failure-without-reason",
@@ -115,7 +125,9 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
         }
 
         // success=true should not carry a failure reason (suspicious).
-        if record.success && (record.error_reason.is_some() || record.error_message.is_some()) {
+        if record.success
+            && (has_error_info(&record.error_reason) || has_error_info(&record.error_message))
+        {
             report.push(Issue {
                 index,
                 code: "success-with-reason",
@@ -187,7 +199,7 @@ pub fn validate_all(records: &[SettlementRecord]) -> ValidationReport {
 
         // Timestamp, when present.
         if let Some(ts) = &record.timestamp {
-            if DateTime::parse_from_rfc3339(ts).is_err() {
+            if DateTime::parse_from_rfc3339(ts.trim()).is_err() {
                 report.push(Issue {
                     index,
                     code: "invalid-timestamp",
@@ -442,5 +454,42 @@ mod tests {
         let report = validate_all(&[]);
         assert!(report.is_ok());
         assert_eq!(report.checked, 0);
+    }
+
+    #[test]
+    fn blank_error_reason_is_still_no_reason_for_failure() {
+        let mut failed = record("eip155:1", &format!("0x{}", "e".repeat(64)), None);
+        failed.success = false;
+        failed.error_reason = Some("   ".into());
+        let report = validate_all(&[failed]);
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.code == "failure-without-reason"),
+            "a whitespace-only errorReason carries no info and must be flagged"
+        );
+
+        let mut ok = record("eip155:1", &format!("0x{}", "f".repeat(64)), Some("1"));
+        ok.error_reason = Some("".into());
+        let report = validate_all(&[ok]);
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|i| i.code == "success-with-reason"),
+            "an empty errorReason must not be treated as a carried reason"
+        );
+    }
+
+    #[test]
+    fn padded_timestamp_is_not_flagged_invalid() {
+        let mut r = record("eip155:1", &format!("0x{}", "c".repeat(64)), Some("1"));
+        r.timestamp = Some(" 2026-11-17T10:00:00Z ".into());
+        let report = validate_all(&[r]);
+        assert!(
+            !report.issues.iter().any(|i| i.code == "invalid-timestamp"),
+            "a padded RFC 3339 timestamp must validate, like other padded fields"
+        );
     }
 }
