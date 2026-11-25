@@ -71,7 +71,15 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 | `decode` | Decode a base64 `PAYMENT-RESPONSE` header |
 | `sample` | Print a sample ledger for demos/tests |
 
-Every command accepts `--format text|json|csv` (defaults vary by command).
+Every command accepts `--format text|json|csv|html` (defaults vary by command).
+The `html` format writes one self-contained document — inlined CSS, no
+JavaScript, no external resources — that you can double-click to read. Use it
+to hand a human a view of the audit results:
+
+```bash
+kite-x402-reconciler report --input ledger.json --output report.html --format html
+```
+
 `validate`, `duplicates`, `reconcile` and `report` also accept
 `--fail-on none|error|warning` (default `none`).
 

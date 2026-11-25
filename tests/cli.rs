@@ -369,6 +369,80 @@ fn cli_report_gate_failure_still_writes_the_artifact() {
 }
 
 #[test]
+fn cli_report_html_is_a_standalone_file() {
+    // `report --format html --output file.html` must produce one self-contained
+    // document that can be opened by double-clicking, with no network deps.
+    let ledger = scratch("html-ledger.json");
+    let report = scratch("html-report.html");
+    let sample = stdout_text(&run(&["sample", "--format", "json"], None));
+    std::fs::write(&ledger, sample).expect("write ledger");
+
+    let output = run(
+        &[
+            "report",
+            "--input",
+            ledger.to_str().unwrap(),
+            "--output",
+            report.to_str().unwrap(),
+            "--format",
+            "html",
+        ],
+        None,
+    );
+    assert!(output.status.success());
+
+    let body = std::fs::read_to_string(&report).expect("HTML report written");
+    assert!(
+        body.starts_with("<!DOCTYPE html>"),
+        "must be a full document"
+    );
+    assert!(body.contains("<style>"), "CSS must be inlined");
+    assert!(body.trim_end().ends_with("</html>"));
+    assert!(body.contains("By network"), "summary sections present");
+    assert!(
+        body.contains("Validation findings"),
+        "issues section present"
+    );
+    assert!(
+        body.contains("duplicate-transaction"),
+        "sample ledger finding must appear: {body}"
+    );
+    assert!(
+        !body.contains("http://") && !body.contains("https://"),
+        "no external resources"
+    );
+}
+
+#[test]
+fn cli_report_html_gate_failure_still_writes_the_file() {
+    // The exit-code contract is format-independent: a dirty ledger still
+    // exits 3 under HTML, but the operator keeps the artifact to inspect.
+    let ledger = scratch("html-gate-ledger.json");
+    let report = scratch("html-gate-report.html");
+    let sample = stdout_text(&run(&["sample", "--format", "json"], None));
+    std::fs::write(&ledger, sample).expect("write ledger");
+
+    let output = run(
+        &[
+            "report",
+            "--input",
+            ledger.to_str().unwrap(),
+            "--output",
+            report.to_str().unwrap(),
+            "--format",
+            "html",
+            "--fail-on",
+            "error",
+        ],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(3));
+    let body = std::fs::read_to_string(&report).expect("HTML report written before gating");
+    assert!(body.starts_with("<!DOCTYPE html>"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("gate failed"));
+}
+
+#[test]
 fn cli_gate_threshold_separates_errors_from_warnings() {
     // One warning, zero errors.
     let lenient = run(

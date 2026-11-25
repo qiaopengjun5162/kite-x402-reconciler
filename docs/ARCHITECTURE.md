@@ -10,7 +10,9 @@ src/lib.rs         public library API + sample_records()
   ├─ ingest.rs     text/file/stdin -> Vec<SettlementRecord>; decode PAYMENT-RESPONSE
   ├─ validate.rs   per-record rules + cross-record duplicate/replay detection
   ├─ reconcile.rs  aggregate by network/payer/day with exact u128 arithmetic
-  └─ report.rs     render ValidationReport / Summary / records as text|json|csv
+  ├─ diff.rs       local-vs-facilitator pairing; four discrepancy kinds
+  ├─ gate.rs       --fail-on threshold -> process exit status
+  └─ report.rs     render ValidationReport / Summary / diff / records as text|json|csv|html
 ```
 
 The CLI deliberately contains no business logic. Everything is testable through the library API.
@@ -25,8 +27,13 @@ file / stdin ──ingest::parse_records──> Vec<SettlementRecord>
              validate::validate_all   reconcile::summarize      report::render_records
                     │                       │
               ValidationReport          Summary
-                    └────────report.rs render text|json|csv──────────┘
+                    └────────report.rs render text|json|csv|html─────┘
+                                       │
+                              gate.rs --fail-on -> exit 0/1/2/3
 ```
+
+Two-ledger mode feeds a second file into `diff::reconcile`, which emits a
+`LedgerDiff` rendered by the same `report.rs` and gated by the same `gate.rs`.
 
 ## Key design decisions
 

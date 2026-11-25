@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `report` (and every other rendering command) accepts `--format html`, which
+  writes one self-contained HTML5 document: inlined CSS, no JavaScript and no
+  external resources, so the report can be opened by double-clicking it with
+  no network access. Full reports show overview cards, per-network/payer/day
+  tables and a color-coded findings table; `reconcile --format html` shows the
+  discrepancy tables. This is the first "human view" of the audit results —
+  text/JSON/CSV remain unchanged for machines. All dynamic fields (payer,
+  error messages, transaction hashes, grouping keys) are HTML-escaped before
+  rendering: a `<script>` in a ledger is displayed as text, never executed.
+  Adding `html` to the `Format` enum is a semver-minor API change for callers
+  that match on it exhaustively; the CLI handles it transparently.
+
 ### Fixed
 
 - Replay detection compared the raw nonce string, so it missed the replays it

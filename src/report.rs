@@ -1,14 +1,19 @@
-//! Reporting: render validation reports, summaries and records as JSON, CSV
-//! or human-readable tables.
+//! Reporting: render validation reports, summaries and records as JSON, CSV,
+//! HTML or human-readable tables.
+
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 
 use crate::diff::LedgerDiff;
 use crate::model::SettlementRecord;
 use crate::reconcile::{Summary, Totals};
-use crate::validate::ValidationReport;
+use crate::validate::{Severity, ValidationReport};
 
 /// Output format selected on the CLI.
+///
+/// Adding a variant is a semver-minor change for callers that exhaustively
+/// match on this enum; the CLI itself handles every variant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     /// Human-readable table.
@@ -17,6 +22,8 @@ pub enum Format {
     Json,
     /// Comma-separated values.
     Csv,
+    /// Self-contained HTML document, viewable by double-clicking the file.
+    Html,
 }
 
 impl std::str::FromStr for Format {
@@ -27,7 +34,8 @@ impl std::str::FromStr for Format {
             "text" => Ok(Self::Text),
             "json" => Ok(Self::Json),
             "csv" => Ok(Self::Csv),
-            other => Err(format!("unknown format: {other} (use text/json/csv)")),
+            "html" => Ok(Self::Html),
+            other => Err(format!("unknown format: {other} (use text/json/csv/html)")),
         }
     }
 }
@@ -51,10 +59,194 @@ fn to_json_pretty<T: Serialize + ?Sized>(value: &T) -> String {
     serde_json::to_string_pretty(value).expect("serialization to string cannot fail")
 }
 
+/// Escape a value before embedding it in HTML.
+///
+/// Settlement records are external input (hand-edited exports, header
+/// decodes). Rendering a `payer` or `errorMessage` containing `<script>` into
+/// a report would turn the report into an XSS vector when opened in a
+/// browser, so every dynamic value must pass through here first.
+fn html_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Inline stylesheet so the report is a single self-contained file: no outer
+/// CSS, no JS, no network. Colors are chosen to be legible on a light page.
+const HTML_STYLE: &str = ":root{color-scheme:light}\
+body{margin:0;padding:24px;font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2937;background:#f9fafb}\
+main{max-width:960px;margin:0 auto}h1{font-size:22px;margin:0 0 4px}\
+h2{font-size:16px;margin:28px 0 10px}p.sub{color:#6b7280;margin:0 0 20px}\
+.cards{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 8px}\
+.card{flex:1 1 140px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px}\
+.card .k{font-size:12px;color:#6b7280}.card .v{font-size:22px;font-weight:600;margin-top:4px}\
+.card.err .v{color:#b91c1c}.card.warn .v{color:#b45309}.card.ok .v{color:#047857}\
+table{border-collapse:collapse;width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}\
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #f3f4f6}\
+th{background:#f9fafb;color:#4b5563;font-weight:600;font-size:12px}\n\
+tr:last-child td{border-bottom:0}\n\
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}\n\
+.tag.error{background:#fee2e2;color:#991b1b}.tag.warning{background:#fef3c7;color:#92400e}\n\
+.note{background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 14px;margin:12px 0}\n\
+code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}\n\
+.empty{color:#6b7280;font-style:italic}\n";
+
+/// Wrap a body fragment in a complete HTML5 document.
+fn html_document(title: &str, body: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>{}</title>\n<style>\n{}\n</style>\n</head>\n<body>\n<main>\n{}\n</main>\n</body>\n</html>\n",
+        html_escape(title),
+        HTML_STYLE,
+        body
+    )
+}
+
+/// One summary card (label + value, with an optional color class).
+fn html_card(label: &str, value: &str, class: &str) -> String {
+    format!(
+        "<div class=\"card {}\"><div class=\"k\">{}</div><div class=\"v\">{}</div></div>",
+        class,
+        html_escape(label),
+        html_escape(value)
+    )
+}
+
+/// Render the overview cards shared by `report` and `summary`.
+fn html_summary_cards(summary: &Summary) -> String {
+    let mut out = String::from("<div class=\"cards\">");
+    out.push_str(&html_card("Records", &summary.total.count.to_string(), ""));
+    out.push_str(&html_card(
+        "Succeeded",
+        &summary.total.succeeded.to_string(),
+        "ok",
+    ));
+    out.push_str(&html_card(
+        "Failed",
+        &summary.total.failed.to_string(),
+        if summary.total.failed > 0 { "warn" } else { "" },
+    ));
+    out.push_str(&html_card(
+        "Total (atomic)",
+        &summary.total.amount_atomic.to_string(),
+        "",
+    ));
+    out.push_str("</div>");
+    if summary.total.amount_overflows > 0 {
+        out.push_str(&format!(
+            "<div class=\"note\">WARNING: {} amount(s) exceeded u128::MAX and were NOT counted; the total is incomplete.</div>",
+            summary.total.amount_overflows
+        ));
+    }
+    out
+}
+
+/// Render one network/payer/day group as an HTML table.
+fn html_totals_table(groups: &BTreeMap<String, Totals>) -> String {
+    if groups.is_empty() {
+        return "<p class=\"empty\">No records.</p>".to_owned();
+    }
+    let mut out = String::from(
+        "<table><thead><tr><th>Key</th><th>Count</th><th>OK</th><th>Fail</th><th>Amount (atomic)</th><th>No amount</th><th>Overflow</th></tr></thead><tbody>",
+    );
+    for (key, totals) in groups {
+        out.push_str(&format!(
+            "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            html_escape(key),
+            totals.count,
+            totals.succeeded,
+            totals.failed,
+            totals.amount_atomic,
+            totals.amount_unavailable,
+            totals.amount_overflows
+        ));
+    }
+    out.push_str("</tbody></table>");
+    out
+}
+
+/// Render already-escaped rows under plain headers.
+///
+/// Callers escape each cell with [`html_escape`] before passing them here;
+/// the header strings are compile-time literals owned by this crate.
+fn html_rows_table<const N: usize>(headers: &[&str], rows: &[[String; N]]) -> String {
+    if rows.is_empty() {
+        return "<p class=\"empty\">None.</p>".to_owned();
+    }
+    let mut out = String::from("<table><thead><tr>");
+    for header in headers {
+        out.push_str(&format!("<th>{}</th>", html_escape(header)));
+    }
+    out.push_str("</tr></thead><tbody>");
+    for row in rows {
+        out.push_str("<tr>");
+        for cell in row {
+            out.push_str(&format!("<td>{}</td>", cell));
+        }
+        out.push_str("</tr>");
+    }
+    out.push_str("</tbody></table>");
+    out
+}
+
+/// Render validation findings as an HTML table with colored severity tags.
+fn html_issues_table(report: &ValidationReport) -> String {
+    if report.issues.is_empty() {
+        return "<p class=\"empty\">No findings — this ledger is clean.</p>".to_owned();
+    }
+    let mut out = String::from(
+        "<table><thead><tr><th>#</th><th>Severity</th><th>Code</th><th>Message</th></tr></thead><tbody>",
+    );
+    for issue in &report.issues {
+        let (tag, class) = match issue.severity {
+            Severity::Error => ("error", "error"),
+            Severity::Warning => ("warning", "warning"),
+        };
+        out.push_str(&format!(
+            "<tr><td>{}</td><td><span class=\"tag {}\">{}</span></td><td><code>{}</code></td><td>{}</td></tr>",
+            issue.index,
+            class,
+            tag,
+            html_escape(issue.code),
+            html_escape(&issue.message)
+        ));
+    }
+    out.push_str("</tbody></table>");
+    out
+}
+
 /// Render a validation report.
 pub fn render_validation(report: &ValidationReport, format: Format) -> String {
     match format {
         Format::Json => to_json_pretty(report),
+        Format::Html => {
+            let mut body = String::from("<h1>Validation report</h1>");
+            body.push_str(&format!(
+                "<p class=\"sub\">Checked {} record(s)</p><div class=\"cards\">",
+                report.checked
+            ));
+            body.push_str(&html_card(
+                "Errors",
+                &report.errors.to_string(),
+                if report.errors > 0 { "err" } else { "" },
+            ));
+            body.push_str(&html_card(
+                "Warnings",
+                &report.warnings.to_string(),
+                if report.warnings > 0 { "warn" } else { "" },
+            ));
+            body.push_str("</div>");
+            body.push_str(&html_issues_table(report));
+            html_document("Validation report", &body)
+        }
         Format::Csv => {
             let mut out = String::from("index,code,severity,message\n");
             for issue in &report.issues {
@@ -97,6 +289,18 @@ pub fn render_validation(report: &ValidationReport, format: Format) -> String {
 pub fn render_summary(summary: &Summary, format: Format) -> String {
     match format {
         Format::Json => to_json_pretty(summary),
+        Format::Html => {
+            let mut body = String::from("<h1>Settlement summary</h1>");
+            body.push_str("<p class=\"sub\">Exact u128 atomic-unit totals · days in UTC</p>");
+            body.push_str(&html_summary_cards(summary));
+            body.push_str("<h2>By network</h2>");
+            body.push_str(&html_totals_table(&summary.by_network));
+            body.push_str("<h2>By payer</h2>");
+            body.push_str(&html_totals_table(&summary.by_payer));
+            body.push_str("<h2>By day (UTC)</h2>");
+            body.push_str(&html_totals_table(&summary.by_day));
+            html_document("Settlement summary", &body)
+        }
         Format::Csv => {
             let mut out = String::from(
                 "group,key,count,succeeded,failed,amount_atomic,amount_unavailable,amount_overflows\n",
@@ -177,6 +381,32 @@ pub fn render_full_report(
             summary,
             validation,
         }),
+        Format::Html => {
+            let mut body = String::from("<h1>x402 settlement report</h1>");
+            body.push_str("<p class=\"sub\">Offline audit · exact atomic-unit money · no external resources</p>");
+            body.push_str(&html_summary_cards(summary));
+            body.push_str("<div class=\"cards\">");
+            body.push_str(&html_card(
+                "Errors",
+                &validation.errors.to_string(),
+                if validation.errors > 0 { "err" } else { "" },
+            ));
+            body.push_str(&html_card(
+                "Warnings",
+                &validation.warnings.to_string(),
+                if validation.warnings > 0 { "warn" } else { "" },
+            ));
+            body.push_str("</div>");
+            body.push_str("<h2>By network</h2>");
+            body.push_str(&html_totals_table(&summary.by_network));
+            body.push_str("<h2>By payer</h2>");
+            body.push_str(&html_totals_table(&summary.by_payer));
+            body.push_str("<h2>By day (UTC)</h2>");
+            body.push_str(&html_totals_table(&summary.by_day));
+            body.push_str("<h2>Validation findings</h2>");
+            body.push_str(&html_issues_table(validation));
+            html_document("x402 settlement report", &body)
+        }
         Format::Csv => render_full_report_csv(summary, validation),
         // Text is for humans, so two labelled sections read better than one
         // wide table. CSV/JSON are machine-facing and stay single-structure.
@@ -263,6 +493,92 @@ fn render_full_report_csv(summary: &Summary, validation: &ValidationReport) -> S
 pub fn render_diff(diff: &LedgerDiff, format: Format) -> String {
     match format {
         Format::Json => to_json_pretty(diff),
+        Format::Html => {
+            let mut body = String::from("<h1>Ledger reconciliation</h1>");
+            body.push_str("<p class=\"sub\">Local records vs facilitator records</p>");
+            body.push_str("<div class=\"cards\">");
+            body.push_str(&html_card("Matched", &diff.matched.to_string(), "ok"));
+            body.push_str(&html_card(
+                "Discrepancies",
+                &diff.errors().to_string(),
+                if diff.errors() > 0 { "err" } else { "" },
+            ));
+            body.push_str(&html_card(
+                "Only local",
+                &diff.only_local.len().to_string(),
+                "warn",
+            ));
+            body.push_str(&html_card(
+                "Only facilitator",
+                &diff.only_facilitator.len().to_string(),
+                "warn",
+            ));
+            body.push_str("</div>");
+            if diff.skipped_unidentified > 0 {
+                body.push_str(&format!(
+                    "<div class=\"note\">WARNING: {} successful record(s) had no transaction hash and were NOT reconciled.</div>",
+                    diff.skipped_unidentified
+                ));
+            }
+            body.push_str(&format!(
+                "<p class=\"sub\">Compared {} pair(s) · skipped {} failed settlement(s)</p>",
+                diff.compared, diff.skipped_failed
+            ));
+            let amount_rows: Vec<[String; 3]> = diff
+                .amount_mismatch
+                .iter()
+                .map(|m| {
+                    [
+                        html_escape(&m.transaction),
+                        html_escape(shown(&m.local_amount)),
+                        html_escape(shown(&m.facilitator_amount)),
+                    ]
+                })
+                .collect();
+            let network_rows: Vec<[String; 3]> = diff
+                .network_mismatch
+                .iter()
+                .map(|m| {
+                    [
+                        html_escape(&m.transaction),
+                        html_escape(&m.local_network),
+                        html_escape(&m.facilitator_network),
+                    ]
+                })
+                .collect();
+            body.push_str("<h2>Amount mismatches</h2>");
+            body.push_str(&html_rows_table(
+                &["Transaction", "Local amount", "Facilitator amount"],
+                &amount_rows,
+            ));
+            body.push_str("<h2>Network mismatches</h2>");
+            body.push_str(&html_rows_table(
+                &["Transaction", "Local network", "Facilitator network"],
+                &network_rows,
+            ));
+            for (label, entries) in [
+                ("Only in local", &diff.only_local),
+                ("Only in facilitator", &diff.only_facilitator),
+            ] {
+                let rows: Vec<[String; 4]> = entries
+                    .iter()
+                    .map(|e| {
+                        [
+                            html_escape(&e.transaction),
+                            html_escape(&e.network),
+                            html_escape(shown(&e.amount)),
+                            html_escape(shown(&e.payer)),
+                        ]
+                    })
+                    .collect();
+                body.push_str(&format!("<h2>{label}</h2>"));
+                body.push_str(&html_rows_table(
+                    &["Transaction", "Network", "Amount", "Payer"],
+                    &rows,
+                ));
+            }
+            html_document("Ledger reconciliation", &body)
+        }
         Format::Csv => {
             let mut out = String::from(
                 "section,transaction,local_amount,facilitator_amount,network,facilitator_network,payer\n",
@@ -373,6 +689,35 @@ pub fn render_records(records: &[SettlementRecord], format: Format) -> String {
                 to_json_pretty(records)
             }
         }
+        Format::Html => {
+            let mut body = String::from("<h1>Settlement records</h1>");
+            body.push_str(&format!("<p class=\"sub\">{} record(s)</p>", records.len()));
+            let rows: Vec<[String; 6]> = records
+                .iter()
+                .map(|r| {
+                    [
+                        if r.success { "OK" } else { "FAIL" }.to_owned(),
+                        html_escape(&r.transaction),
+                        html_escape(&r.network),
+                        html_escape(shown(&r.amount)),
+                        html_escape(shown(&r.payer)),
+                        html_escape(shown(&r.error_reason)),
+                    ]
+                })
+                .collect();
+            body.push_str(&html_rows_table(
+                &[
+                    "Status",
+                    "Transaction",
+                    "Network",
+                    "Amount",
+                    "Payer",
+                    "Error reason",
+                ],
+                &rows,
+            ));
+            html_document("Settlement records", &body)
+        }
         Format::Csv => {
             let mut out = String::from(
                 "success,transaction,network,amount,payer,resource,timestamp,nonce,errorReason,errorMessage\n",
@@ -471,7 +816,89 @@ mod tests {
         assert_eq!("json".parse::<Format>().unwrap(), Format::Json);
         assert_eq!("TEXT".parse::<Format>().unwrap(), Format::Text);
         assert_eq!("csv".parse::<Format>().unwrap(), Format::Csv);
+        assert_eq!("HTML".parse::<Format>().unwrap(), Format::Html);
         assert!("yaml".parse::<Format>().is_err());
+    }
+
+    #[test]
+    fn html_escape_neutralizes_every_dangerous_character() {
+        assert_eq!(
+            html_escape("<script>alert('x')</script> & \"q\""),
+            "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; &quot;q&quot;"
+        );
+        assert_eq!(html_escape("plain"), "plain");
+    }
+
+    #[test]
+    fn html_full_report_escapes_hostile_record_fields() {
+        // A ledger field is external input. If a `<script>` in an error
+        // message reached the HTML raw, opening the report would execute it.
+        let validation = ValidationReport {
+            checked: 1,
+            errors: 1,
+            warnings: 0,
+            issues: vec![Issue {
+                index: 0,
+                code: "invalid-network",
+                severity: Severity::Error,
+                message: "<script>alert(1)</script> & 'x'".into(),
+            }],
+        };
+        let mut by_payer = BTreeMap::new();
+        by_payer.insert("<img src=x onerror=alert(1)>".into(), Totals::default());
+        let summary = Summary {
+            record_count: 1,
+            by_payer,
+            ..Summary::default()
+        };
+        let html = render_full_report(&summary, &validation, Format::Html);
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(
+            !html.contains("<script>"),
+            "raw script tag leaked into report"
+        );
+        assert!(
+            !html.contains("<img src=x"),
+            "raw img tag leaked into report"
+        );
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;"));
+        assert!(html.contains("&amp; &#39;x&#39;"));
+    }
+
+    #[test]
+    fn html_renderers_emit_standalone_documents() {
+        let summary = Summary {
+            record_count: 1,
+            ..Summary::default()
+        };
+        let validation = ValidationReport::default();
+        let diff = LedgerDiff::default();
+        let record = SettlementRecord {
+            success: true,
+            error_reason: None,
+            error_message: None,
+            payer: None,
+            transaction: "0x1".into(),
+            network: "eip155:1".into(),
+            amount: None,
+            resource: None,
+            timestamp: None,
+            nonce: None,
+        };
+        for html in [
+            render_validation(&validation, Format::Html),
+            render_summary(&summary, Format::Html),
+            render_full_report(&summary, &validation, Format::Html),
+            render_diff(&diff, Format::Html),
+            render_records(std::slice::from_ref(&record), Format::Html),
+        ] {
+            assert!(html.starts_with("<!DOCTYPE html>"));
+            assert!(html.contains("<style>"), "CSS must be inlined");
+            assert!(html.trim_end().ends_with("</html>"));
+            assert!(!html.contains("http://"), "no external resources");
+            assert!(!html.contains("https://"), "no external resources");
+        }
     }
 
     #[test]

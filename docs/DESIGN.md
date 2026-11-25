@@ -11,7 +11,7 @@
 - ✅ tag `v0.1.0` 已推送
 - ✅ tag `v0.2.0`（2026-11-20）：新增 `reconcile` 双子对账与 `--fail-on` 门禁，
   **76 测试**（51 单元 + 25 集成），clippy 零警告，MSRV 1.88 实跑通过
-- ✅ 33 测试通过、fmt 干净、clippy 零警告、release 构建成功；六个子命令端到端验证通过
+- ✅ 83 单元 + 31 集成测试通过、fmt 干净、clippy 零警告、release 构建成功；八个子命令端到端验证通过
 - ✅ 质量加固（2026-11-17 第二批）：新增 12 个 CLI 端到端集成测试（共 45 测试）、
   `docs/TESTING.md`、`demo.sh` 运行演示、README 配置与已知限制章节；全部门禁通过。
 - ✅ 质量重构（2026-11-17 第三批）：修复按天聚合的时区口径（统一 UTC）、
@@ -66,16 +66,18 @@ SettleResponse {
 
 | 子命令 | 功能 |
 |---|---|
+| `ingest` | 读取并归一化记录，转出 JSON / CSV / text / HTML |
 | `validate` | 校验一批结算记录，输出 Error/Warning 问题清单 |
 | `summary` | 按 network / payer / day 聚合笔数、成功失败、总金额 |
 | `duplicates` | 检测重复 transaction 与重复 nonce（payer+nonce） |
-| `report` | 导出 CSV / JSON 对账报表 |
+| `reconcile` | 本地账本 vs facilitator 账本按交易哈希配对，输出四类差异 |
+| `report` | 导出 CSV / JSON / HTML 对账报表 |
 | `decode` | 解码一个 `PAYMENT-RESPONSE` header 为结算记录 |
 | `sample` | 生成示例账本（demo / 测试用） |
 
 ## 四、技术方案
 
-- Rust 2021 edition，纯 std + `serde`/`serde_json`/`chrono`/`clap`/`thiserror`/`base64`/`anyhow`。
+- Rust 2021 edition，纯 std + `serde`/`serde_json`/`chrono`/`clap`/`base64`/`anyhow`；库内错误用手写的 `ReconcileError`（未引入 `thiserror`）。
 - 库 + CLI 双层：`src/lib.rs` 暴露可复用 API，`src/main.rs` 是 clap CLI。
 - 金额一律 `u128` 原子单位；展示时才按 decimals 转字符串（不用浮点）。
 - 输入支持 JSON 数组 / JSONL / 单个对象 / `-`（stdin）。
@@ -83,7 +85,7 @@ SettleResponse {
 ## 五、验收标准（Definition of Done）
 
 1. `cargo test --workspace` 全绿；`cargo clippy --all-targets -- -D warnings` 零警告；`cargo fmt --check` 干净。
-2. 六个子命令都能端到端跑通，有可复现示例。
+2. 八个子命令都能端到端跑通，有可复现示例。
 3. README + docs/ARCHITECTURE.md + 使用文档 + `.env.example` + CHANGELOG.md + LICENSE 齐全。
 4. 所有校验规则、边界（空输入、非法金额、CAIP-2 边界、重复）都有测试。
 5. 公开仓库，commit 关联本人 GitHub 账号，原创代码（不复制五个仓库的实现）。
@@ -98,7 +100,7 @@ SettleResponse {
 | D4 | `validate.rs` 重复检测（transaction / nonce） + 边界单测 |
 | D5 | `reconcile.rs` 聚合（network/payer/day、u128 精确金额） + 单测 |
 | D6 | `report.rs`（CSV/JSON/表格、CSV 转义） + 单测 |
-| D7 | `main.rs` CLI 六个子命令接线 + 集成测试 |
+| D7 | `main.rs` CLI 八个子命令接线 + 集成测试 |
 | D8 | 文档：README / ARCHITECTURE / USAGE / .env.example / CHANGELOG / LICENSE |
 | D9 | CI workflow + 边界加固 + 回归测试 |
 | D10 | 发仓库、打 tag、按反馈修复 |

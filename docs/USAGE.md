@@ -26,7 +26,22 @@ kite-x402-reconciler reconcile --local ledger.json --facilitator facilitator-exp
 
 # Everything to one file.
 kite-x402-reconciler report --input ledger.json --output report.json
+
+# Human-readable view: one self-contained HTML file you can double-click.
+kite-x402-reconciler report --input ledger.json --output report.html --format html
 ```
+
+### Output formats
+
+`--format` accepts `text`, `json`, `csv` and `html` (defaults vary by command).
+`html` produces a single standalone HTML5 document with inlined CSS — no
+JavaScript, no external stylesheets, no network calls — so it opens offline by
+double-clicking. `report --format html` shows overview cards, per-network /
+payer / day tables and a color-coded findings table; `reconcile --format html`
+shows the discrepancy tables. All ledger-sourced strings are HTML-escaped, so
+a `<script>` in an error message is shown as text rather than executed. The
+`--fail-on` exit-code contract is unchanged: a dirty ledger still exits `3`,
+and the HTML file is written before the gate is applied.
 
 ## Feeding real x402 data
 
