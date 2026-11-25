@@ -201,6 +201,16 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
+`tests/panic_safety.rs` feeds pseudo-random bytes and adversarial-but-parseable
+ledgers through every public entry point: parsing must return `Err` rather than
+panic, and `reconcile` must stay consistent under that input — swapping the two
+sides mirrors the findings, and every identifiable record lands in exactly one
+bucket. For a longer run, raise the sample count:
+
+```bash
+PANIC_SAFETY_ITERATIONS=300000 cargo test --release --test panic_safety
+```
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

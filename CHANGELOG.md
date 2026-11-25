@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   nonces keep their case, because only hex identifiers have a case-insensitive
   spelling and folding them would invent replays.
 
+### Changed
+
+- No behavior change: added a panic-safety and consistency test over
+  pseudo-random ledgers. It asserts that adversarial bytes become decode errors
+  rather than panics (a cron job should see exit `1`, not `101`), that swapping
+  the two sides of `reconcile` only mirrors the one-sided findings, and that
+  every identifiable record on a side lands in exactly one bucket
+  (`matched` / amount mismatch / network mismatch / one-sided). 300k seeded
+  iterations pass; the CI default is a 2k smoke run, and
+  `PANIC_SAFETY_ITERATIONS` raises it.
+
 ## [0.2.4] - 2026-11-25
 
 ### Fixed
