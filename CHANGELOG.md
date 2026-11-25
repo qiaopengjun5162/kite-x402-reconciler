@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-25
+
 ### Fixed
 
 - `sample_records()` documented "one duplicate transaction and one replayed
@@ -207,7 +209,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Documentation: README, DESIGN (five-repo comparison), ARCHITECTURE, USAGE,
   `.env.example`, CHANGELOG, Apache-2.0 license, CI workflow.
 
-[Unreleased]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/qiaopengjun5162/kite-x402-reconciler/releases/tag/v0.2.1
 [0.2.0]: https://github.com/qiaopengjun5162/kite-x402-reconciler/compare/v0.1.0...v0.2.0
