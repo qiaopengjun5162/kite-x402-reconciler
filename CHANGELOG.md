@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `sample_records()` documented "one duplicate transaction and one replayed
+  nonce", but the returned ledger only had the duplicate transaction — the two
+  records for payer `a` used different nonces, so `duplicates` (the tool's
+  security view) never demonstrated replay detection on the sample the docs
+  tell users to run. The replaying record now reuses `nonce-1`, so the sample
+  exercises both documented findings.
 - Three parsing/validity checks still used raw field values while the rest of
   the pipeline trims before comparing: an `errorReason`/`errorMessage` of `""`
   or whitespace passed `failure-without-reason` (and conversely tripped

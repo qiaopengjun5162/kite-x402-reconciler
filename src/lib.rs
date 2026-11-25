@@ -49,7 +49,11 @@ pub fn sample_records() -> Vec<SettlementRecord> {
             timestamp: Some("2026-11-17T10:40:00Z".into()),
             nonce: Some("nonce-2".into()),
         },
-        // Duplicate transaction of the first record.
+        // Replays the first record: same transaction *and* the same nonce for
+        // payer `a`. Reusing the nonce (rather than inventing a new one) is
+        // what makes the sample exercise both documented findings — the
+        // duplicate transaction and the replayed nonce — so `duplicates`
+        // actually demonstrates the replay detection it exists for.
         SettlementRecord {
             success: true,
             error_reason: None,
@@ -60,7 +64,7 @@ pub fn sample_records() -> Vec<SettlementRecord> {
             amount: Some("1500000".into()),
             resource: Some("/v1/forecast".into()),
             timestamp: Some("2026-11-17T11:00:00Z".into()),
-            nonce: Some("nonce-3".into()),
+            nonce: Some("nonce-1".into()),
         },
         // Failed settlement on a different network.
         SettlementRecord {

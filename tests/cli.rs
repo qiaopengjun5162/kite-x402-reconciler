@@ -209,8 +209,27 @@ fn cli_report_csv_has_one_header_and_both_kinds() {
 #[test]
 fn library_sample_has_expected_issues() {
     let report = validate_all(&sample_records());
-    assert_eq!(report.errors, 1);
+    assert_eq!(report.errors, 2);
     assert_eq!(report.checked, 4);
+}
+
+#[test]
+fn library_sample_contains_both_documented_issues() {
+    // `sample_records()` documents one duplicate transaction *and* one
+    // replayed nonce. The sample is the only demo path for `duplicates`, so
+    // if it lacks a replay the "security view" never shows that finding.
+    let report = validate_all(&sample_records());
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| i.code == "duplicate-transaction"),
+        "sample must contain the documented duplicate transaction"
+    );
+    assert!(
+        report.issues.iter().any(|i| i.code == "duplicate-nonce"),
+        "sample must contain the documented replayed nonce"
+    );
 }
 
 #[test]
