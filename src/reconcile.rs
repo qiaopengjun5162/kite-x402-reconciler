@@ -283,4 +283,88 @@ mod tests {
             "a padded RFC 3339 timestamp must still land in its UTC day bucket"
         );
     }
+
+    /// Every record must be counted once in the grand total and exactly once in
+    /// each breakdown. If a group ever holds a record the total does not (or
+    /// vice versa) the two views disagree and the operator cannot tell which
+    /// number is real — the failure mode this whole tool exists to prevent.
+    fn assert_partitions(label: &str, groups: &BTreeMap<String, Totals>, total: &Totals) {
+        let count: usize = groups.values().map(|t| t.count).sum();
+        let amount: u128 = groups.values().map(|t| t.amount_atomic).sum();
+        let unavailable: usize = groups.values().map(|t| t.amount_unavailable).sum();
+        assert_eq!(
+            count, total.count,
+            "{label}: counts must add up to the total"
+        );
+        assert_eq!(
+            amount, total.amount_atomic,
+            "{label}: amounts must add up to the total"
+        );
+        assert_eq!(
+            unavailable, total.amount_unavailable,
+            "{label}: unavailable counts must add up to the total"
+        );
+        for (key, group) in groups {
+            assert_eq!(
+                group.succeeded + group.failed,
+                group.count,
+                "{label}[{key}]: succeeded + failed must cover the group"
+            );
+        }
+    }
+
+    #[test]
+    fn every_breakdown_partitions_the_total() {
+        // One ledger that exercises every bucket at once: a payer written two
+        // ways, a padded network, a second chain, a failed (uncounted) amount,
+        // an unparseable amount and an unparseable day.
+        let records = vec![
+            rec(
+                "eip155:2424",
+                Some("0xABCD"),
+                Some("2026-11-17"),
+                true,
+                Some("1000"),
+            ),
+            rec(
+                " eip155:2424 ",
+                Some(" 0xabcd "),
+                Some("2026-11-17"),
+                true,
+                Some(" 2500 "),
+            ),
+            rec(
+                "eip155:1",
+                Some("0xabcd"),
+                Some("2026-11-18"),
+                true,
+                Some("7"),
+            ),
+            // Failed settlements are counted but never summed.
+            rec("eip155:1", None, None, false, Some("999")),
+            rec(
+                "eip155:2424",
+                Some("0xdead"),
+                Some("bad"),
+                true,
+                Some("nope"),
+            ),
+        ];
+        let summary = summarize(&records);
+
+        assert_eq!(summary.total.count, 5);
+        assert_eq!(summary.total.succeeded, 4);
+        assert_eq!(summary.total.failed, 1);
+        assert_eq!(summary.total.amount_atomic, 3507);
+        assert_eq!(summary.total.amount_unavailable, 1);
+
+        // The two payer spellings are one identity, so this is one group — not
+        // two groups holding half the money each.
+        assert_eq!(summary.by_payer["0xabcd"].count, 3);
+        assert_eq!(summary.by_payer["0xabcd"].amount_atomic, 3507);
+
+        assert_partitions("network", &summary.by_network, &summary.total);
+        assert_partitions("payer", &summary.by_payer, &summary.total);
+        assert_partitions("day", &summary.by_day, &summary.total);
+    }
 }

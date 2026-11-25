@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- No behavior change: `summary` gained an invariant test asserting that each
+  breakdown (`by_network`, `by_payer`, `by_day`) adds up to the grand total —
+  record counts, settled amounts and unavailable-amount counts alike. The
+  existing tests pinned individual groups to expected values; none checked that
+  the groups partition the total, so a record counted twice (or dropped from
+  one view) could have passed. Verified to fail against the pre-v0.2.2
+  raw-value grouping.
+
 ## [0.2.3] - 2026-11-25
 
 ### Fixed
