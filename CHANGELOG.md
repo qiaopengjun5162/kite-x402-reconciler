@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Replay detection compared the raw nonce string, so it missed the replays it
+  exists to catch: the same nonce written with surrounding whitespace
+  (`" n1"` vs `"n1"`) or as the same hex value in a different case
+  (`0xAB..` vs `0xab..`) was treated as two distinct authorizations, and
+  `duplicates --fail-on error` exited `0` on a replayed nonce. The
+  `(payer, nonce)` key is now canonicalized like every other identity in the
+  crate. A blank nonce is no longer a key — previously two records that both
+  omitted the value (`""`) were reported as a replay of each other. Opaque
+  nonces keep their case, because only hex identifiers have a case-insensitive
+  spelling and folding them would invent replays.
+
 ## [0.2.4] - 2026-11-25
 
 ### Fixed

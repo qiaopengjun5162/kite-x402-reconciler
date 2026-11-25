@@ -170,7 +170,11 @@ is included for wrapper scripts and documents the optional hints
   the record falls into `(unknown)`.
 - Cross-record replay detection is scoped to the **current input batch**.
   Detecting nonces reused across days requires concatenating those ledgers
-  into one input.
+  into one input. The `(payer, nonce)` key is canonicalized before comparing:
+  padding is ignored, a hex nonce is case-insensitive (it is the EIP-3009
+  `bytes32` value), an opaque nonce keeps its case, and a blank nonce is
+  treated as absent rather than as one nonce every record shares. A replay that
+  only differs in spelling is still a replay.
 - Amounts are summed in **atomic units** as `u128`. Values above `u128::MAX`
   are rejected at parse time. Human-readable decimals are a display concern
   (`format_atomic`); the CLI prints atomic units and does not assume a token's

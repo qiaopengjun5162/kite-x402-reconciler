@@ -152,6 +152,34 @@ pub fn normalize_address(raw: &str) -> Option<String> {
     normalize_hex_id(raw)
 }
 
+/// Normalize a payment nonce into the identity key used for replay detection.
+///
+/// A nonce arrives from the same hand-edited exports as a hash, so the same
+/// rule applies: surrounding whitespace is not part of the value, and an empty
+/// nonce is "absent" rather than a value every record shares.
+///
+/// Case folding is narrower than for a hash. A hex nonce (the EIP-3009
+/// `bytes32` form, `0x` + hex digits) has no case, so `0xAB..` and `0xab..`
+/// authorize the same transfer. An opaque nonce (`n1`, `order-42`) has no such
+/// rule — two spellings may be two different values — so it keeps its case and
+/// only gets trimmed.
+#[must_use]
+pub fn normalize_nonce(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let hex_body = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"));
+    match hex_body {
+        Some(body) if !body.is_empty() && body.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Some(format!("0x{}", body.to_ascii_lowercase()))
+        }
+        _ => Some(trimmed.to_owned()),
+    }
+}
+
 impl SettlementRecord {
     /// View the `network` field as a [`NetworkId`].
     ///
@@ -221,6 +249,23 @@ mod tests {
             normalize_hash(&address)
         );
         assert_eq!(normalize_address("  "), None);
+    }
+
+    #[test]
+    fn normalize_nonce_trims_and_folds_only_hex_case() {
+        assert_eq!(normalize_nonce("  0xABcd  "), Some("0xabcd".to_owned()));
+        assert_eq!(normalize_nonce("0XAB"), Some("0xab".to_owned()));
+        assert_eq!(normalize_nonce("  n1 "), Some("n1".to_owned()));
+        // Opaque nonces have no case rule: folding them would merge two
+        // different authorizations into one replay finding.
+        assert_eq!(normalize_nonce("AbC"), Some("AbC".to_owned()));
+        assert_eq!(normalize_nonce("0xZZ"), Some("0xZZ".to_owned()));
+    }
+
+    #[test]
+    fn normalize_nonce_treats_blank_as_absent() {
+        assert_eq!(normalize_nonce(""), None);
+        assert_eq!(normalize_nonce(" \t\n "), None);
     }
 
     #[test]

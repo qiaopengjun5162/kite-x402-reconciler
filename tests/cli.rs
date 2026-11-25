@@ -116,6 +116,48 @@ fn cli_duplicates_detects_replayed_nonce() {
 }
 
 #[test]
+fn cli_duplicates_gates_a_replay_that_differs_only_in_spelling() {
+    // The security view exists to catch a reused authorization, so a nonce
+    // padded with whitespace or written as the same hex value in another case
+    // must still trip the gate. Comparing the raw strings let both through and
+    // exited 0 on a replayed nonce.
+    let payer = format!("0x{}", "a".repeat(40));
+    let hex_nonce = format!("0x{}", "AB".repeat(32));
+    let hex_nonce_lower = format!(" 0x{} ", "ab".repeat(32));
+    let json = format!(
+        r#"[
+          {{"success":true,"transaction":"0x{}","network":"eip155:1","payer":"{payer}","nonce":"n1"}},
+          {{"success":true,"transaction":"0x{}","network":"eip155:1","payer":"{payer}","nonce":"  n1  "}},
+          {{"success":true,"transaction":"0x{}","network":"eip155:1","payer":"{payer}","nonce":"{hex_nonce}"}},
+          {{"success":true,"transaction":"0x{}","network":"eip155:1","payer":"{payer}","nonce":"{hex_nonce_lower}"}}
+        ]"#,
+        "1".repeat(64),
+        "2".repeat(64),
+        "3".repeat(64),
+        "4".repeat(64)
+    );
+    let output = run(
+        &[
+            "duplicates",
+            "--input",
+            "-",
+            "--format",
+            "json",
+            "--fail-on",
+            "error",
+        ],
+        Some(&json),
+    );
+    assert_eq!(output.status.code(), Some(3), "a replay must trip the gate");
+    let text = stdout_text(&output);
+    assert_eq!(
+        text.matches("duplicate-nonce").count(),
+        2,
+        "both spelling-only replays must be reported: {text}"
+    );
+}
+
+#[test]
 fn cli_decode_header() {
     use base64::Engine;
     let inner = r#"{"success":true,"transaction":"0x1","network":"eip155:2424","amount":"7"}"#;

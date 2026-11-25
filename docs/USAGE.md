@@ -59,6 +59,11 @@ kite-x402-reconciler ingest --input headers.json
 | `errorReason` / `errorMessage` | no | Required in spirit when `success=false` |
 | `resource` / `timestamp` / `nonce` | no | Bookkeeping for audit / replay detection |
 
+Replay detection compares `(payer, nonce)` after canonicalizing both: surrounding
+whitespace is not part of either value, a hex nonce (`0x` + hex digits) is
+case-insensitive like every other hex identifier, and an opaque nonce keeps its
+case. A blank nonce counts as absent, not as a nonce shared by every record.
+
 ## Validation codes
 
 | Code | Severity | Meaning |
@@ -67,7 +72,7 @@ kite-x402-reconciler ingest --input headers.json
 | `invalid-network` | error | Not a CAIP-2 `namespace:reference` |
 | `invalid-amount` | error | Amount is not a non-negative integer |
 | `duplicate-transaction` | error | Same `transaction` appears twice |
-| `duplicate-nonce` | error | Same `(payer, nonce)` appears twice |
+| `duplicate-nonce` | error | Same `(payer, nonce)` appears twice; both sides are trimmed, and a hex nonce is case-insensitive |
 | `missing-transaction` | error | Empty transaction hash |
 | `success-with-reason` | warning | `success=true` but an error reason is set |
 | `invalid-transaction` | warning | Hash is not `0x` + 64 hex |

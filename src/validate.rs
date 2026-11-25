@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::DateTime;
 use serde::Serialize;
 
-use crate::model::{normalize_address, normalize_hash, SettlementRecord};
+use crate::model::{normalize_address, normalize_hash, normalize_nonce, SettlementRecord};
 
 /// How serious a validation issue is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -239,9 +239,11 @@ fn append_duplicate_issues(records: &[SettlementRecord], report: &mut Validation
     }
 
     // Replayed nonces within the same payer (error: double-spend risk).
-    // Normalize the payer address exactly like transaction hashes: EVM
-    // addresses are case-insensitive hex, so `0xABCD` and ` 0xabcd ` are one
-    // payer and a repeated nonce under either spelling is a single replay.
+    // Both halves of the key are canonicalized: the payer address like any
+    // other EVM address, and the nonce like any other identifier (trimmed, and
+    // case-folded when it is hex). Comparing raw spellings misses replays that
+    // only differ in padding or hex case, on exactly the security view meant to
+    // catch them.
     let mut seen_nonces: HashSet<(String, String)> = HashSet::new();
     for (index, record) in records.iter().enumerate() {
         let (Some(payer), Some(nonce)) = (&record.payer, &record.nonce) else {
@@ -250,7 +252,11 @@ fn append_duplicate_issues(records: &[SettlementRecord], report: &mut Validation
         let Some(payer_key) = normalize_address(payer) else {
             continue;
         };
-        if !seen_nonces.insert((payer_key, nonce.clone())) {
+        // A blank nonce is "no nonce", not a nonce shared by every record.
+        let Some(nonce_key) = normalize_nonce(nonce) else {
+            continue;
+        };
+        if !seen_nonces.insert((payer_key, nonce_key)) {
             report.push(Issue {
                 index,
                 code: "duplicate-nonce",
@@ -435,6 +441,80 @@ mod tests {
         assert!(
             report.issues.iter().any(|i| i.code == "duplicate-nonce"),
             "the same payer in different case/padding must still be a reused nonce"
+        );
+    }
+
+    #[test]
+    fn duplicate_nonce_detection_normalizes_nonce_identity() {
+        // A nonce reaches the tool the same way a hash does: from hand-edited
+        // exports and mixed-case logs. Padding is not part of the value, and a
+        // hex nonce (the EIP-3009 bytes32 form) has no case, so `0xAB..` and
+        // `0xab..` are one authorization. Comparing the raw strings misses both
+        // replays — on the security view that is a silent false negative.
+        let payer = format!("0x{}", "c".repeat(40));
+
+        let mut padded_a = record("eip155:1", "0x1", None);
+        padded_a.payer = Some(payer.clone());
+        padded_a.nonce = Some("n1".into());
+        let mut padded_b = record("eip155:1", "0x2", None);
+        padded_b.payer = Some(payer.clone());
+        padded_b.nonce = Some("  n1  ".into());
+        let report = validate_all(&[padded_a, padded_b]);
+        assert!(
+            report.issues.iter().any(|i| i.code == "duplicate-nonce"),
+            "a padded nonce must still be recognized as the same nonce"
+        );
+
+        let mut hex_a = record("eip155:1", "0x3", None);
+        hex_a.payer = Some(payer.clone());
+        hex_a.nonce = Some(format!("0x{}", "AB".repeat(32)));
+        let mut hex_b = record("eip155:1", "0x4", None);
+        hex_b.payer = Some(payer);
+        hex_b.nonce = Some(format!(" 0x{} ", "ab".repeat(32)));
+        let report = validate_all(&[hex_a, hex_b]);
+        assert!(
+            report.issues.iter().any(|i| i.code == "duplicate-nonce"),
+            "the same hex nonce in different case/padding is one replay"
+        );
+    }
+
+    #[test]
+    fn blank_nonce_is_absent_not_a_replay() {
+        // An empty nonce carries no authorization identity, exactly like a
+        // blank payer. Treating it as a key makes every pair of records that
+        // omit the nonce look like a replay.
+        let payer = format!("0x{}", "d".repeat(40));
+        let mut a = record("eip155:1", "0x1", None);
+        a.payer = Some(payer.clone());
+        a.nonce = Some(String::new());
+        let mut b = record("eip155:1", "0x2", None);
+        b.payer = Some(payer);
+        b.nonce = Some(String::new());
+        let report = validate_all(&[a, b]);
+        assert!(
+            !report.issues.iter().any(|i| i.code == "duplicate-nonce"),
+            "a blank nonce must not be treated as a reused nonce"
+        );
+    }
+
+    #[test]
+    fn opaque_nonce_case_stays_significant() {
+        // Only hex identifiers have a case-insensitive spelling. An opaque
+        // nonce (`AbC` vs `aBc`) is two different values, so folding case on
+        // every nonce would invent replays that never happened.
+        let payer = format!("0x{}", "e".repeat(40));
+        let mut a = record("eip155:1", "0x1", None);
+        a.payer = Some(payer.clone());
+        a.nonce = Some("AbC".into());
+        let mut b = record("eip155:1", "0x2", None);
+        b.payer = Some(payer);
+        b.nonce = Some("aBc".into());
+        assert!(
+            !validate_all(&[a, b])
+                .issues
+                .iter()
+                .any(|i| i.code == "duplicate-nonce"),
+            "opaque nonces are case-sensitive"
         );
     }
 
