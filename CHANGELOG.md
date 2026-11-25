@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Adding `html` to the `Format` enum is a semver-minor API change for callers
   that match on it exhaustively; the CLI handles it transparently.
 
+- Optional `web` feature and `serve` command: a local, browser-based view that
+  lets you drag in a ledger, click into every discrepancy, and download the
+  same HTML report. The server binds `127.0.0.1` only, has no authentication
+  and makes no outbound calls; the page is embedded at compile time with no
+  external CSS/JS/fonts. Every endpoint runs the same library functions as the
+  CLI — no validation or money logic is duplicated — and browser-side values
+  are rendered with `textContent` rather than `innerHTML`. The feature is off
+  by default: a normal build still has six dependencies and one binary, and
+  the default `cargo test` builds nothing web-related.
+
 ### Fixed
 
 - Replay detection compared the raw nonce string, so it missed the replays it

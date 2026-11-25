@@ -43,6 +43,26 @@ a `<script>` in an error message is shown as text rather than executed. The
 `--fail-on` exit-code contract is unchanged: a dirty ledger still exits `3`,
 and the HTML file is written before the gate is applied.
 
+## Local web UI (optional)
+
+A browser front-end is available behind the non-default `web` feature:
+
+```bash
+cargo run --release --features web -- serve
+# prints: kite-x402-reconciler web UI: http://127.0.0.1:<port>
+```
+
+Open that address. Port `0` (the default) picks a free port; use
+`serve --port 8787` to fix one. The page lets you drag in a JSON/JSONL ledger,
+load a sample, click into each validation finding and discrepancy, and download
+the full HTML report. The two-ledger tab does the same for `reconcile`.
+
+The server binds loopback only and has **no authentication** — do not expose it
+to a LAN or a public interface. It makes no outbound requests, and the page has
+no external CSS/JS/fonts. Every analysis is performed by the same library
+functions the CLI calls; the browser is only a shell. A normal build (no
+`--features web`) remains a six-dependency, single-binary CLI.
+
 ## Feeding real x402 data
 
 If your service logs the facilitator's `SettleResponse` JSON, point `--input`

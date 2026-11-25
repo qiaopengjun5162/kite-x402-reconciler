@@ -121,6 +121,16 @@ enum Command {
         #[arg(short, long, default_value = "json")]
         format: Format,
     },
+    /// Start a local-only web interface for exploring ledgers in a browser.
+    ///
+    /// Requires the `web` feature. Binds 127.0.0.1 only; there is no auth,
+    /// so it must never be exposed to a network.
+    #[cfg(feature = "web")]
+    Serve {
+        /// Port on 127.0.0.1 (0 = let the OS pick a free port).
+        #[arg(short, long, default_value_t = 0)]
+        port: u16,
+    },
 }
 
 fn main() -> ExitCode {
@@ -233,6 +243,20 @@ fn run() -> Result<ExitCode> {
         Command::Sample { format } => {
             let records = sample_records();
             print!("{}", render_records(&records, format));
+            Ok(ExitCode::SUCCESS)
+        }
+        #[cfg(feature = "web")]
+        Command::Serve { port } => {
+            // The web shell is async; the rest of this CLI is synchronous and
+            // the runtime is built only for this command, so default builds
+            // never link tokio.
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .context("failed to build async runtime")?;
+            runtime
+                .block_on(kite_x402_reconciler::web::serve(port))
+                .context("web server failed")?;
             Ok(ExitCode::SUCCESS)
         }
     }

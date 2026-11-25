@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kite-x402-reconciler · 本地审计台</title>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2937;background:#f9fafb}
+header{background:#111827;color:#f9fafb;padding:14px 24px}
+header h1{font-size:17px;margin:0}
+header p{margin:2px 0 0;color:#9ca3af;font-size:12px}
+main{max-width:960px;margin:0 auto;padding:20px 24px 60px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+button{font:inherit;cursor:pointer;border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:7px 14px;color:#374151}
+button:hover{border-color:#9ca3af}
+.tab.on{background:#111827;color:#fff;border-color:#111827}
+.primary{background:#047857;color:#fff;border-color:#047857;font-weight:600}
+.primary:hover{background:#065f46}
+.drop{border:2px dashed #d1d5db;border-radius:10px;padding:18px;text-align:center;color:#6b7280;background:#fff;margin-bottom:10px}
+.drop.over{border-color:#047857;background:#ecfdf5;color:#047857}
+textarea{width:100%;min-height:150px;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#fff;resize:vertical}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 18px}
+#error{background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:8px;padding:10px 14px;margin:12px 0;display:none}
+.cards{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.card{flex:1 1 130px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px}
+.card .k{font-size:12px;color:#6b7280}.card .v{font-size:21px;font-weight:600;margin-top:4px}
+.card.err .v{color:#b91c1c}.card.warn .v{color:#b45309}.card.ok .v{color:#047857}
+h2{font-size:15px;margin:24px 0 8px}
+table{border-collapse:collapse;width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+th,td{text-align:left;padding:7px 11px;border-bottom:1px solid #f3f4f6}
+th{background:#f9fafb;color:#4b5563;font-size:12px}
+tr:last-child td{border-bottom:0}
+code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.tag.error{background:#fee2e2;color:#991b1b}.tag.warning{background:#fef3c7;color:#92400e}
+details{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;margin:6px 0}
+summary{cursor:pointer;font-weight:600}
+pre{white-space:pre-wrap;word-break:break-all;font:12px/1.5 ui-monospace,Menlo,monospace;color:#4b5563;margin:10px 0 2px}
+.empty{color:#6b7280;font-style:italic}
+.hint{color:#6b7280;font-size:12px;margin:4px 0 12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>kite-x402-reconciler · 本地审计台</h1>
+  <p>账本只在你的浏览器和本机服务之间流转，不上传、不联网</p>
+</header>
+<main>
+  <div class="tabs">
+    <button class="tab on" id="tab-single">单账本审计</button>
+    <button class="tab" id="tab-pair">双账本对账</button>
+  </div>
+
+  <section id="single">
+    <div class="drop" id="drop">把 JSON / JSONL 账本拖到这里，或在下面粘贴</div>
+    <textarea id="ledger" placeholder='粘贴账本 JSON 数组、JSONL，或单条结算记录'></textarea>
+    <div class="bar">
+      <button id="load-sample">载入样例账本</button>
+      <button class="primary" id="run-report">分析这批账本</button>
+      <button id="dl-report">下载 HTML 报表</button>
+    </div>
+  </section>
+
+  <section id="pair" hidden>
+    <p class="hint">本地账本 = 你的服务记的；facilitator 账本 = 链上/网关导出的。按交易哈希逐笔配对。</p>
+    <textarea id="local" placeholder="本地账本 JSON / JSONL"></textarea>
+    <textarea id="facilitator" placeholder="facilitator 账本 JSON / JSONL" style="margin-top:8px"></textarea>
+    <div class="bar">
+      <button id="load-pair">两边都载入样例</button>
+      <button class="primary" id="run-diff">开始对账</button>
+      <button id="dl-diff">下载 HTML 报表</button>
+    </div>
+  </section>
+
+  <div id="error"></div>
+  <div id="result"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = String(text);
+  return n;
+};
+const clear = (node) => { while (node.firstChild) node.removeChild(node.firstChild); };
+const showError = (msg) => {
+  const box = $('error');
+  box.textContent = msg || '';
+  box.style.display = msg ? 'block' : 'none';
+};
+const card = (host, label, value, cls) => {
+  const c = el('div', 'card ' + (cls || ''));
+  c.appendChild(el('div', 'k', label));
+  c.appendChild(el('div', 'v', value));
+  host.appendChild(c);
+};
+const table = (host, headers, rows) => {
+  if (!rows.length) { host.appendChild(el('p', 'empty', '无记录。')); return; }
+  const t = el('table');
+  const thead = el('thead'), hr = el('tr');
+  headers.forEach((h) => hr.appendChild(el('th', null, h)));
+  thead.appendChild(hr); t.appendChild(thead);
+  const tbody = el('tbody');
+  rows.forEach((row) => {
+    const tr = el('tr');
+    row.forEach((cell) => tr.appendChild(el('td', null, cell)));
+    tbody.appendChild(tr);
+  });
+  t.appendChild(tbody); host.appendChild(t);
+};
+const details = (host, summaryText, value) => {
+  const d = el('details');
+  d.appendChild(el('summary', null, summaryText));
+  d.appendChild(el('pre', null, JSON.stringify(value, null, 2)));
+  host.appendChild(d);
+};
+const section = (title) => {
+  const h = el('h2', null, title);
+  $('result').appendChild(h);
+  const box = el('div');
+  $('result').appendChild(box);
+  return box;
+};
+const post = async (path, body, json) => {
+  const opts = { method: 'POST', body };
+  if (json) opts.headers = { 'content-type': 'application/json' };
+  const resp = await fetch(path, opts);
+  const text = await resp.text();
+  if (!resp.ok) {
+    let msg = text;
+    try { msg = JSON.parse(text).error || text; } catch (e) {}
+    throw new Error(msg);
+  }
+  return text;
+};
+
+function renderReport(data) {
+  clear($('result')); showError('');
+  const s = data.summary, v = data.validation;
+  const cards = el('div', 'cards');
+  card(cards, '记录数', s.total.count);
+  card(cards, '成功', s.total.succeeded, 'ok');
+  card(cards, '失败', s.total.failed, s.total.failed ? 'warn' : '');
+  card(cards, '总额(原子单位)', s.total.amount_atomic);
+  card(cards, '错误', v.errors, v.errors ? 'err' : '');
+  card(cards, '警告', v.warnings, v.warnings ? 'warn' : '');
+  $('result').appendChild(cards);
+  const groupRows = (groups) => Object.keys(groups).map((k) => {
+    const t = groups[k];
+    return [k, t.count, t.succeeded, t.failed, t.amount_atomic, t.amount_unavailable, t.amount_overflows];
+  });
+  const headers = ['键', '笔数', '成功', '失败', '金额(原子)', '无金额', '溢出'];
+  table(section('按网络'), headers, groupRows(s.by_network));
+  table(section('按付款方'), headers, groupRows(s.by_payer));
+  table(section('按日期(UTC)'), headers, groupRows(s.by_day));
+  const issues = section('校验发现');
+  if (!v.issues.length) {
+    issues.appendChild(el('p', 'empty', '干净——没有发现问题。'));
+  } else {
+    v.issues.forEach((it) => {
+      const d = el('details');
+      const sum = el('summary');
+      const tag = el('span', 'tag ' + it.severity, it.severity);
+      sum.appendChild(tag);
+      sum.appendChild(document.createTextNode(' #' + it.index + '  ' + it.code + '  ' + it.message));
+      d.appendChild(sum);
+      d.appendChild(el('pre', null, JSON.stringify(it, null, 2)));
+      issues.appendChild(d);
+    });
+  }
+}
+
+function renderDiff(d) {
+  clear($('result')); showError('');
+  const cards = el('div', 'cards');
+  card(cards, '配对成功', d.matched, 'ok');
+  card(cards, '差异', d.errors(), d.errors() ? 'err' : '');
+  card(cards, '仅本地', d.only_local.length, 'warn');
+  card(cards, '仅 facilitator', d.only_facilitator.length, 'warn');
+  $('result').appendChild(cards);
+  const pairs = [
+    ['金额不符', d.amount_mismatch, (x) => [x.transaction, x.local_amount, x.facilitator_amount], ['交易哈希', '本地金额', '网关金额']],
+    ['网络不符', d.network_mismatch, (x) => [x.transaction, x.local_network, x.facilitator_network], ['交易哈希', '本地网络', '网关网络']],
+    ['仅本地有', d.only_local, (x) => [x.transaction, x.network, x.amount, x.payer], ['交易哈希', '网络', '金额', '付款方']],
+    ['仅 facilitator 有', d.only_facilitator, (x) => [x.transaction, x.network, x.amount, x.payer], ['交易哈希', '网络', '金额', '付款方']],
+  ];
+  pairs.forEach(([title, items, cells, headers]) => {
+    const host = section(title + ' (' + items.length + ')');
+    if (!items.length) { host.appendChild(el('p', 'empty', '无。')); return; }
+    const t = el('table'), thead = el('thead'), hr = el('tr');
+    headers.forEach((h) => hr.appendChild(el('th', null, h)));
+    thead.appendChild(hr); t.appendChild(thead);
+    const tbody = el('tbody');
+    items.forEach((it) => {
+      const tr = el('tr');
+      cells(it).forEach((c) => tr.appendChild(el('td', null, c === undefined ? '—' : c)));
+      tbody.appendChild(tr);
+    });
+    t.appendChild(tbody); host.appendChild(t);
+    host.appendChild(el('p', 'hint', '点开下表任一笔，查看原始字段：'));
+    items.forEach((it) => details(host, it.transaction + '  ·  ' + (it.network || ''), it));
+  });
+}
+
+const download = async (text, name) => {
+  const blob = new Blob([text], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = el('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+};
+
+$('tab-single').onclick = () => {
+  $('tab-single').classList.add('on'); $('tab-pair').classList.remove('on');
+  $('single').hidden = false; $('pair').hidden = true;
+};
+$('tab-pair').onclick = () => {
+  $('tab-pair').classList.add('on'); $('tab-single').classList.remove('on');
+  $('pair').hidden = false; $('single').hidden = true;
+};
+$('load-sample').onclick = async () => {
+  try { $('ledger').value = JSON.stringify(await (await fetch('/api/sample')).json(), null, 2); showError(''); }
+  catch (e) { showError(e.message); }
+};
+$('load-pair').onclick = async () => {
+  try {
+    const sample = JSON.stringify(await (await fetch('/api/sample')).json(), null, 2);
+    $('local').value = sample; $('facilitator').value = sample; showError('');
+  } catch (e) { showError(e.message); }
+};
+$('drop').addEventListener('dragover', (e) => { e.preventDefault(); $('drop').classList.add('over'); });
+$('drop').addEventListener('dragleave', () => $('drop').classList.remove('over'));
+$('drop').addEventListener('drop', (e) => {
+  e.preventDefault(); $('drop').classList.remove('over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { $('ledger').value = reader.result; };
+  reader.readAsText(file);
+});
+$('run-report').onclick = async () => {
+  try { renderReport(JSON.parse(await post('/api/report', $('ledger').value))); }
+  catch (e) { showError(e.message); }
+};
+$('run-diff').onclick = async () => {
+  const body = JSON.stringify({ local: $('local').value, facilitator: $('facilitator').value });
+  try { renderDiff(JSON.parse(await post('/api/reconcile', body, true))); }
+  catch (e) { showError(e.message); }
+};
+$('dl-report').onclick = async () => {
+  try { download(await post('/api/report/html', $('ledger').value), 'x402-report.html'); }
+  catch (e) { showError(e.message); }
+};
+$('dl-diff').onclick = async () => {
+  const body = JSON.stringify({ local: $('local').value, facilitator: $('facilitator').value });
+  try { download(await post('/api/reconcile/html', body, true), 'x402-reconcile.html'); }
+  catch (e) { showError(e.message); }
+};
+</script>
+</body>
+</html>

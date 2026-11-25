@@ -14,6 +14,11 @@ pub mod reconcile;
 pub mod report;
 pub mod validate;
 
+/// Optional local web UI. Compiled only with the `web` feature; the default
+/// library and CLI stay free of any network server dependency.
+#[cfg(feature = "web")]
+pub mod web;
+
 use model::SettlementRecord;
 
 /// Build a small sample ledger for demos and tests.

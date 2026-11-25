@@ -70,6 +70,7 @@ cat ledger.jsonl | kite-x402-reconciler summary --format json
 | `report` | Summary + issues to a file (or stdout) |
 | `decode` | Decode a base64 `PAYMENT-RESPONSE` header |
 | `sample` | Print a sample ledger for demos/tests |
+| `serve` | *(needs `--features web`)* Local browser UI to drag in ledgers and click into findings |
 
 Every command accepts `--format text|json|csv|html` (defaults vary by command).
 The `html` format writes one self-contained document — inlined CSS, no
@@ -82,6 +83,19 @@ kite-x402-reconciler report --input ledger.json --output report.html --format ht
 
 `validate`, `duplicates`, `reconcile` and `report` also accept
 `--fail-on none|error|warning` (default `none`).
+
+### Browser view (optional)
+
+For a point-and-click view — drag in a ledger, click into each discrepancy,
+download the report — build with the `web` feature:
+
+```bash
+cargo run --release --features web -- serve
+# open the http://127.0.0.1:<port> address it prints
+```
+
+It binds loopback only, has no authentication, and makes no outbound requests.
+The default build is unchanged: six dependencies, one binary, no server.
 
 ## Two-ledger reconciliation
 

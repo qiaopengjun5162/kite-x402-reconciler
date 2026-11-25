@@ -12,10 +12,11 @@ src/lib.rs         public library API + sample_records()
   ├─ reconcile.rs  aggregate by network/payer/day with exact u128 arithmetic
   ├─ diff.rs       local-vs-facilitator pairing; four discrepancy kinds
   ├─ gate.rs       --fail-on threshold -> process exit status
-  └─ report.rs     render ValidationReport / Summary / diff / records as text|json|csv|html
+  ├─ report.rs     render ValidationReport / Summary / diff / records as text|json|csv|html
+  └─ web.rs        [feature = "web"] local-only axum shell + embedded HTML page
 ```
 
-The CLI deliberately contains no business logic. Everything is testable through the library API.
+The CLI deliberately contains no business logic. Everything is testable through the library API. The web shell follows the same rule: its endpoints call `parse_records` / `summarize` / `validate_all` / `reconcile` / `render_*` and add no accounting logic of their own, so a browser user and a CLI user get the same answer from the same bytes.
 
 ## Data flow
 
@@ -57,6 +58,12 @@ Two-ledger mode feeds a second file into `diff::reconcile`, which emits a
 
 5. **Offline-first.** No network calls; all deps are common crates with local
    caches. `cargo test --offline` works after the first fetch.
+
+6. **Optional, local-only web shell.** `web.rs` is behind the non-default `web`
+   feature, so the normal CLI keeps its six dependencies and single binary.
+   When enabled it binds `127.0.0.1` only (no `--host` flag, no auth, no CORS)
+   and embeds its page at compile time. This keeps the browser view a
+   convenience layer, never a new deployment surface.
 
 ## Extension points
 
