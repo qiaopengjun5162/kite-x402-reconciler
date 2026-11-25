@@ -226,37 +226,84 @@ pub fn reconcile(local: &[SettlementRecord], facilitator: &[SettlementRecord]) -
         let facilitator_records = facilitator_by_tx.remove(&key).unwrap_or_default();
 
         // Network is part of a settlement's identity, so pair same-network
-        // records first instead of trusting row order. A transaction hash can
-        // appear on several chains; pairing by position would report two clean
-        // settlements as cross-chain mismatches purely because the two exports
-        // listed their rows in different orders. For each local record take the
-        // *first* unpaired facilitator record on the same network, falling back
-        // to any unpaired record only when that network is exhausted. Slots are
-        // consumed by index so unpaired facilitator records still come out in
-        // input order, preserving the documented output ordering.
-        let pairs = local_records.len().min(facilitator_records.len());
+        // records before reaching across chains: a transaction hash can appear
+        // on several chains, and pairing by position would report two clean
+        // settlements as cross-chain mismatches purely because the exports
+        // listed their rows in a different order.
+        //
+        // The same reasoning applies *within* a network, where one hash can
+        // legitimately appear more than once (a duplicated ledger row). Taking
+        // the first same-network candidate regardless of amount made the
+        // verdict depend on row order again: the same two settlements, listed
+        // in opposite orders, paired as two amount mismatches instead of two
+        // matches. Pairing is therefore done in three passes — equal network
+        // and amount, then same network, then whatever is left — so a bucket
+        // of equal settlements always pairs with its equals.
+        // Three passes over *every* local record — pairing is limited by the
+        // candidate pool, not by position, so when the facilitator settled a
+        // subset the settlement that actually has a counterpart is the one
+        // that pairs.
+        const UNPAIRED: usize = usize::MAX;
         let mut taken = vec![false; facilitator_records.len()];
-        let mut choices: Vec<usize> = Vec::with_capacity(pairs);
-        for local_record in &local_records[..pairs] {
+        let mut choices = vec![UNPAIRED; local_records.len()];
+
+        for (slot, local_record) in local_records.iter().enumerate() {
+            let network = local_record.network.trim();
+            let equal = facilitator_records.iter().enumerate().find(|(i, rec)| {
+                !taken[*i]
+                    && rec.network.trim() == network
+                    && same_amount(&local_record.amount, &rec.amount)
+            });
+            if let Some((index, _)) = equal {
+                taken[index] = true;
+                choices[slot] = index;
+            }
+        }
+
+        for (slot, local_record) in local_records.iter().enumerate() {
+            if choices[slot] != UNPAIRED {
+                continue;
+            }
             let network = local_record.network.trim();
             let same_network = facilitator_records
                 .iter()
                 .enumerate()
                 .find(|(i, rec)| !taken[*i] && rec.network.trim() == network);
-            let pick = same_network.or_else(|| {
-                facilitator_records
-                    .iter()
-                    .enumerate()
-                    .find(|(i, _)| !taken[*i])
-            });
-            let Some((index, _)) = pick else {
-                unreachable!("pairs <= facilitator records, so an unpaired one exists")
-            };
-            taken[index] = true;
-            choices.push(index);
+            if let Some((index, _)) = same_network {
+                taken[index] = true;
+                choices[slot] = index;
+            }
         }
 
-        for (local_record, fac_index) in local_records[..pairs].iter().zip(choices) {
+        // Whatever is left pairs across chains and is reported as a network
+        // mismatch. Slots are consumed by index, so unpaired facilitator
+        // records still come out in input order, preserving the documented
+        // output ordering.
+        for choice in &mut choices {
+            if *choice != UNPAIRED {
+                continue;
+            }
+            let Some((index, _)) = facilitator_records
+                .iter()
+                .enumerate()
+                .find(|(i, _)| !taken[*i])
+            else {
+                break;
+            };
+            taken[index] = true;
+            *choice = index;
+        }
+
+        // A local record with no counterpart is one-sided. This is how a
+        // duplicated transaction shows up: one copy pairs, and the extra copy
+        // becomes a finding instead of vanishing. Emitting in local order keeps
+        // the documented ordering; unpaired facilitator records are emitted
+        // below in their original input order.
+        for (local_record, fac_index) in local_records.iter().zip(choices) {
+            if fac_index == UNPAIRED {
+                diff.only_local.push(entry(local_record));
+                continue;
+            }
             let facilitator_record = facilitator_records[fac_index];
             diff.compared += 1;
             // CAIP-2 network is part of a settlement's identity: the same hash
@@ -281,13 +328,6 @@ pub fn reconcile(local: &[SettlementRecord], facilitator: &[SettlementRecord]) -
             }
         }
 
-        // Beyond the shorter side, records are unpaired. This is how a
-        // duplicated transaction shows up: it pairs once, and the extra copy
-        // becomes a one-sided finding instead of vanishing. Unpaired
-        // facilitator records are emitted in their original input order.
-        for record in &local_records[pairs..] {
-            diff.only_local.push(entry(record));
-        }
         for (index, record) in facilitator_records.iter().enumerate() {
             if !taken[index] {
                 diff.only_facilitator.push(entry(record));
@@ -548,5 +588,76 @@ mod tests {
             "a padded amount is the same atomic value as its trimmed form"
         );
         assert!(same_amount(&Some("01000".into()), &Some("  1000  ".into())));
+    }
+
+    fn on_network(mut record: SettlementRecord, network: &str) -> SettlementRecord {
+        record.network = network.into();
+        record
+    }
+
+    #[test]
+    fn pairing_is_independent_of_export_row_order() {
+        // Two rows share a hash and a chain, so they form one bucket, and the
+        // facilitator export lists them in the opposite order. Since both
+        // ledgers hold the same two settlements, the verdict must be "agrees"
+        // — pairing by position would report two amount mismatches instead.
+        let local = vec![rec("0xaa", Some("100")), rec("0xaa", Some("200"))];
+        let reversed = vec![rec("0xaa", Some("200")), rec("0xaa", Some("100"))];
+        let diff = reconcile(&local, &reversed);
+        assert_eq!(diff.compared, 2);
+        assert_eq!(
+            diff.matched, 2,
+            "row order must not manufacture amount disagreements"
+        );
+        assert!(diff.amount_mismatch.is_empty());
+        assert_eq!(diff.errors(), 0);
+        assert!(diff.is_clean());
+    }
+
+    #[test]
+    fn finding_counts_survive_permuting_both_sides() {
+        // Same three settlements on both sides, written in a different order.
+        let build = |order: [usize; 3]| {
+            let rows = [
+                on_network(rec("0xaa", Some("100")), "eip155:2424"),
+                on_network(rec("0xaa", Some("200")), "eip155:2424"),
+                on_network(rec("0xaa", Some("100")), "eip155:1"),
+            ];
+            order.iter().map(|i| rows[*i].clone()).collect::<Vec<_>>()
+        };
+        let forward = reconcile(&build([0, 1, 2]), &build([0, 1, 2]));
+        let shuffled = reconcile(&build([0, 1, 2]), &build([2, 1, 0]));
+        let tallies = |d: &LedgerDiff| {
+            (
+                d.matched,
+                d.amount_mismatch.len(),
+                d.network_mismatch.len(),
+                d.only_local.len(),
+                d.only_facilitator.len(),
+            )
+        };
+        assert_eq!(tallies(&forward), (3, 0, 0, 0, 0));
+        assert_eq!(
+            tallies(&shuffled),
+            tallies(&forward),
+            "the verdict must not change when an export is reordered"
+        );
+    }
+
+    #[test]
+    fn an_unaccounted_settlement_is_one_sided_not_a_mismatch() {
+        // Local billed the same hash twice (100 and 200); the facilitator only
+        // settled the 200. Pairing the equal amounts leaves the 100 visible as
+        // an unaccounted settlement, which is the honest finding.
+        let local = vec![rec("0xaa", Some("100")), rec("0xaa", Some("200"))];
+        let diff = reconcile(&local, &[rec("0xaa", Some("200"))]);
+        assert_eq!(diff.matched, 1);
+        assert!(
+            diff.amount_mismatch.is_empty(),
+            "200 was settled as 200; that pair is not a disagreement"
+        );
+        assert_eq!(diff.only_local.len(), 1);
+        assert_eq!(diff.only_local[0].amount.as_deref(), Some("100"));
+        assert_eq!(diff.errors(), 1);
     }
 }

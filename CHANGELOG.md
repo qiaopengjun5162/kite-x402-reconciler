@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `reconcile` paired records within a transaction hash by position, so the
+  verdict still depended on export row order whenever a hash appeared more than
+  once on the same chain (a duplicated ledger row). Two ledgers holding exactly
+  the same settlements, listed in opposite orders, were reported as two amount
+  mismatches — and `--fail-on error` returned `3` for data that agrees. Pairing
+  now runs in three passes: same network *and* equal amount first, then same
+  network, then cross-chain leftovers. Equal settlements pair with their equals,
+  while a genuine amount or chain disagreement is still reported. Pairing is
+  also no longer capped at the shorter side's length, so when the facilitator
+  settled only a subset, the settlement that has a counterpart is the one that
+  pairs and the rest surface as one-sided findings.
+
 ### Changed
 
 - No behavior change: `summary` gained an invariant test asserting that each
